@@ -1,0 +1,36 @@
+{
+  "name": "jwt-auth-demo",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "dev": "nodemon server.js",
+    "start": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "engines": {
+    "node": ">=20 <23"
+  },
+  "dependencies": {
+    "@payos/node": "^2.0.5",
+    "bcryptjs": "^3.0.2",
+    "cloudinary": "^2.10.0",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^17.2.2",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongodb": "^7.2.0",
+    "mongoose": "^8.18.1",
+    "multer": "^2.0.2",
+    "nodemailer": "^9.0.1",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "validator": "^13.15.15"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
