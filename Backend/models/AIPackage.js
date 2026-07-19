@@ -33,6 +33,11 @@ const aiPackageSchema = new mongoose.Schema(
       enum: ["one-time", "monthly", "yearly"],
       default: "one-time",
     },
+    isTrial: {
+      type: Boolean,
+      default: false,
+      description: "Whether this package can only be purchased once per account",
+    },
     active: {
       type: Boolean,
       default: true,

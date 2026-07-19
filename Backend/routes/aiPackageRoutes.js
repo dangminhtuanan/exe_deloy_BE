@@ -33,6 +33,10 @@
  *           type: string
  *           enum: [one-time, monthly, yearly]
  *           example: one-time
+ *         isTrial:
+ *           type: boolean
+ *           description: Each account can purchase this package only once
+ *           example: false
  *         active:
  *           type: boolean
  *           example: true
@@ -116,6 +120,9 @@
  *           type: string
  *           enum: [one-time, monthly, yearly]
  *           example: monthly
+ *         isTrial:
+ *           type: boolean
+ *           example: false
  *         displayOrder:
  *           type: number
  *           example: 1

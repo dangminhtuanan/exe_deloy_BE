@@ -22,6 +22,11 @@ const aiTransactionSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    isTrial: {
+      type: Boolean,
+      default: false,
+      description: "Snapshot of whether the purchased package was a trial",
+    },
     provider: {
       type: String,
       enum: ["cod", "momo", "vnpay", "bank_transfer", "stripe", "paypal", "PAYOS"],
@@ -66,6 +71,13 @@ const aiTransactionSchema = new mongoose.Schema(
       default: null,
       description: "When the subscription expires (for recurring packages)",
     },
+    trialPurchaseKey: {
+      type: String,
+      trim: true,
+      default: undefined,
+      select: false,
+      description: "Unique account key reserved by a trial purchase",
+    },
     rawWebhookPayload: {
       type: mongoose.Schema.Types.Mixed,
       default: null,
@@ -77,5 +89,8 @@ const aiTransactionSchema = new mongoose.Schema(
 // Index for efficient queries
 aiTransactionSchema.index({ user: 1, createdAt: -1 });
 aiTransactionSchema.index({ status: 1 });
+// A trial reservation remains after payment, so an account can never buy any
+// trial package twice. Failed/cancelled reservations remove this field.
+aiTransactionSchema.index({ trialPurchaseKey: 1 }, { unique: true, sparse: true });
 
 module.exports = mongoose.model("AITransaction", aiTransactionSchema);

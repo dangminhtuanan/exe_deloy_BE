@@ -27,7 +27,7 @@ exports.getAllPackages = async (req, res) => {
 // Admin/Manager: Create a new AI package
 exports.createPackage = async (req, res) => {
   try {
-    const { name, description, price, credits, features, duration, displayOrder } = req.body;
+    const { name, description, price, credits, features, duration, displayOrder, isTrial } = req.body;
 
     if (!name || price === undefined || !credits) {
       return res.status(400).json({ message: "Missing required fields: name, price, credits" });
@@ -45,6 +45,7 @@ exports.createPackage = async (req, res) => {
       credits,
       features: features || [],
       duration: duration || "one-time",
+      isTrial: Boolean(isTrial),
       displayOrder: displayOrder || 0,
     });
 
@@ -95,7 +96,7 @@ exports.deletePackage = async (req, res) => {
 exports.getMyTransactions = async (req, res) => {
   try {
     const transactions = await AITransaction.find({ user: req.user.id })
-      .populate("package", "name credits price")
+      .populate("package", "name credits price isTrial")
       .sort({ createdAt: -1 });
 
     res.json({ message: "Get transactions successfully", transactions });
@@ -142,15 +143,48 @@ exports.purchasePackage = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
+    if (aiPackage.isTrial) {
+      // This also covers purchases made before trialPurchaseKey was introduced.
+      const previousTrialPurchase = await AITransaction.findOne({
+        user: user._id,
+        $or: [{ isTrial: true }, { package: aiPackage._id }],
+        status: { $in: ["pending", "PENDING", "paid", "PAID"] },
+      }).lean();
+
+      if (previousTrialPurchase) {
+        return res.status(409).json({
+          message: ["paid", "PAID"].includes(previousTrialPurchase.status)
+            ? "Mỗi tài khoản chỉ được mua gói dùng thử một lần"
+            : "Tài khoản đang có giao dịch gói dùng thử chờ thanh toán",
+          code: ["paid", "PAID"].includes(previousTrialPurchase.status)
+            ? "TRIAL_ALREADY_PURCHASED"
+            : "TRIAL_ALREADY_RESERVED",
+        });
+      }
+    }
+
     // Create transaction
-    const transaction = await AITransaction.create({
-      user: user._id,
-      package: aiPackage._id,
-      amount: aiPackage.price,
-      credits: aiPackage.credits,
-      provider: "PAYOS",
-      status: "pending",
-    });
+    let transaction;
+    try {
+      transaction = await AITransaction.create({
+        user: user._id,
+        package: aiPackage._id,
+        amount: aiPackage.price,
+        credits: aiPackage.credits,
+        isTrial: aiPackage.isTrial,
+        provider: "PAYOS",
+        status: "pending",
+        trialPurchaseKey: aiPackage.isTrial ? String(user._id) : undefined,
+      });
+    } catch (error) {
+      if (aiPackage.isTrial && error?.code === 11000) {
+        return res.status(409).json({
+          message: "Tài khoản đã mua hoặc đang thanh toán gói dùng thử",
+          code: "TRIAL_ALREADY_RESERVED",
+        });
+      }
+      throw error;
+    }
 
     // Generate PayOS order code (timestamp-based, unique)
     const orderCode = Math.floor(Date.now() / 1000);
@@ -197,6 +231,7 @@ exports.purchasePackage = async (req, res) => {
     } catch (payosError) {
       // If PayOS fails, mark transaction as failed
       transaction.status = "failed";
+      transaction.trialPurchaseKey = undefined;
       await transaction.save();
 
       res.status(500).json({
@@ -303,6 +338,7 @@ exports.handlePaymentWebhook = async (req, res) => {
       }
     } else {
       transaction.status = "FAILED";
+      transaction.trialPurchaseKey = undefined;
     }
 
     await transaction.save();
