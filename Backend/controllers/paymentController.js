@@ -1,17 +1,24 @@
 const Order = require("../models/Order");
 const Payment = require("../models/Payment");
 const { isStaffRole } = require("../middleware/roleMiddleware");
+const {
+  PAYMENT_STATUS,
+  PAYMENT_TARGET,
+  getPaymentTarget,
+  markPaymentPaid,
+  markPaymentTerminated,
+  normalizePaymentStatus,
+} = require("../services/payosPaymentService");
 
 function canAccessPayment(req, payment) {
   return isStaffRole(req.user?.role) || String(payment.user._id || payment.user) === String(req.user.id);
 }
 
 function mapPaymentStatusToOrder(status) {
-  if (status === "paid") return "paid";
-  if (status === "PAID") return "paid";
-  if (status === "failed") return "failed";
-  if (status === "FAILED" || status === "CANCELLED") return "failed";
-  if (status === "refunded") return "refunded";
+  const normalized = normalizePaymentStatus(status);
+  if (normalized === PAYMENT_STATUS.PAID) return "paid";
+  if ([PAYMENT_STATUS.FAILED, PAYMENT_STATUS.CANCELLED].includes(normalized)) return "failed";
+  if (normalized === PAYMENT_STATUS.REFUNDED) return "refunded";
   return "pending";
 }
 
@@ -35,11 +42,12 @@ exports.createPayment = async (req, res) => {
     }
 
     const payment = await Payment.create({
+      targetType: PAYMENT_TARGET.ORDER,
       order: order._id,
       user: order.user,
       provider,
       amount: order.totalAmount,
-      status: "pending",
+      status: PAYMENT_STATUS.PENDING,
       transactionNo,
       rawResponse,
     });
@@ -58,6 +66,7 @@ exports.getMyPayments = async (req, res) => {
   try {
     const payments = await Payment.find({ user: req.user.id })
       .populate("order")
+      .populate("aiTransaction")
       .sort({ createdAt: -1 });
 
     res.json({ message: "Get my payments successfully", payments });
@@ -69,12 +78,16 @@ exports.getMyPayments = async (req, res) => {
 exports.getPayments = async (req, res) => {
   try {
     const filter = {};
-    if (req.query.status) filter.status = req.query.status;
+    if (req.query.status) {
+      const status = normalizePaymentStatus(req.query.status);
+      filter.status = { $in: [status, status.toLowerCase()] };
+    }
     if (req.query.provider) filter.provider = req.query.provider;
 
     const payments = await Payment.find(filter)
       .populate("user", "username email phone")
       .populate("order")
+      .populate("aiTransaction")
       .sort({ createdAt: -1 });
 
     res.json({ message: "Get payments successfully", payments });
@@ -87,7 +100,8 @@ exports.getPaymentById = async (req, res) => {
   try {
     const payment = await Payment.findById(req.params.id)
       .populate("user", "username email phone")
-      .populate("order");
+      .populate("order")
+      .populate("aiTransaction");
 
     if (!payment) {
       return res.status(404).json({ message: "Payment not found" });
@@ -106,29 +120,65 @@ exports.getPaymentById = async (req, res) => {
 exports.updatePaymentStatus = async (req, res) => {
   try {
     const { status, transactionNo, rawResponse } = req.body;
-    const payment = await Payment.findById(req.params.id);
+    let payment = await Payment.findById(req.params.id);
 
     if (!payment) {
       return res.status(404).json({ message: "Payment not found" });
     }
 
     if (status) {
-      payment.status = status;
-      payment.paidAt = status === "paid" ? new Date() : payment.paidAt;
+      const normalizedStatus = normalizePaymentStatus(status);
+      const currentStatus = normalizePaymentStatus(payment.status);
+      if (!Object.values(PAYMENT_STATUS).includes(normalizedStatus)) {
+        return res.status(400).json({ message: "Payment status is invalid" });
+      }
+      if (currentStatus === PAYMENT_STATUS.PAID && normalizedStatus === PAYMENT_STATUS.PENDING) {
+        return res.status(409).json({ message: "A paid payment cannot return to pending" });
+      }
+      if (
+        normalizedStatus === PAYMENT_STATUS.REFUNDED &&
+        (currentStatus !== PAYMENT_STATUS.PAID || getPaymentTarget(payment) !== PAYMENT_TARGET.ORDER)
+      ) {
+        return res.status(409).json({ message: "Only a paid order payment can be marked as refunded" });
+      }
+
+      if (normalizedStatus === PAYMENT_STATUS.PAID) {
+        payment = await markPaymentPaid(
+          payment,
+          {
+            amount: payment.amount,
+            reference: transactionNo || payment.transactionNo,
+            transactionDateTime: new Date().toISOString(),
+            paymentLinkId: payment.paymentLinkId,
+          },
+          rawResponse,
+        );
+      } else if ([PAYMENT_STATUS.CANCELLED, PAYMENT_STATUS.FAILED].includes(normalizedStatus)) {
+        payment = await markPaymentTerminated(payment, normalizedStatus, rawResponse);
+      } else {
+        payment.status = normalizedStatus;
+        await payment.save();
+      }
+    } else {
+      payment.status = normalizePaymentStatus(payment.status);
     }
 
     if (transactionNo !== undefined) payment.transactionNo = transactionNo;
     if (rawResponse !== undefined) payment.rawResponse = rawResponse;
-
     await payment.save();
 
-    const order = await Order.findById(payment.order);
-    if (order) {
-      order.paymentStatus = mapPaymentStatusToOrder(payment.status);
-      if (order.paymentStatus === "paid") {
-        moveOrderAfterPaid(order);
+    if (getPaymentTarget(payment) === PAYMENT_TARGET.ORDER && payment.order) {
+      const order = await Order.findById(payment.order);
+      if (
+        order &&
+        ![PAYMENT_STATUS.PAID, PAYMENT_STATUS.CANCELLED, PAYMENT_STATUS.FAILED].includes(
+          normalizePaymentStatus(payment.status),
+        )
+      ) {
+        order.paymentStatus = mapPaymentStatusToOrder(payment.status);
+        if (order.paymentStatus === "paid") moveOrderAfterPaid(order);
+        await order.save();
       }
-      await order.save();
     }
 
     res.json({ message: "Update payment successfully", payment });

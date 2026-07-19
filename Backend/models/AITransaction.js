@@ -32,6 +32,11 @@ const aiTransactionSchema = new mongoose.Schema(
       enum: ["cod", "momo", "vnpay", "bank_transfer", "stripe", "paypal", "PAYOS"],
       default: "PAYOS",
     },
+    payment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payment",
+      default: null,
+    },
     orderCode: {
       type: Number,
       unique: true,
@@ -49,8 +54,8 @@ const aiTransactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "paid", "failed", "cancelled", "PENDING", "PAID", "CANCELLED", "FAILED"],
-      default: "pending",
+      enum: ["PENDING", "PAID", "CANCELLED", "FAILED"],
+      default: "PENDING",
     },
     transactionNo: {
       type: String,
@@ -63,6 +68,10 @@ const aiTransactionSchema = new mongoose.Schema(
       trim: true,
     },
     paidAt: {
+      type: Date,
+      default: null,
+    },
+    creditsGrantedAt: {
       type: Date,
       default: null,
     },
@@ -92,5 +101,19 @@ aiTransactionSchema.index({ status: 1 });
 // A trial reservation remains after payment, so an account can never buy any
 // trial package twice. Failed/cancelled reservations remove this field.
 aiTransactionSchema.index({ trialPurchaseKey: 1 }, { unique: true, sparse: true });
+
+aiTransactionSchema.set("toJSON", {
+  transform(document, returnedObject) {
+    if (returnedObject.status) returnedObject.status = String(returnedObject.status).toUpperCase();
+    return returnedObject;
+  },
+});
+
+aiTransactionSchema.pre("validate", function normalizeStatus(next) {
+  if (this.status) {
+    this.status = String(this.status).toUpperCase();
+  }
+  next();
+});
 
 module.exports = mongoose.model("AITransaction", aiTransactionSchema);

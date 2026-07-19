@@ -49,6 +49,24 @@ const userSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  monthlyAiCredits: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  paidAiCredits: {
+    type: Number,
+    default: 0,
+    min: 0,
+  },
+  monthlyAiCreditPeriod: {
+    type: String,
+    default: null,
+  },
+  monthlyAiCreditGrantedAt: {
+    type: Date,
+    default: null,
+  },
 }, { timestamps: true });
 
 const User = mongoose.model("User", userSchema);

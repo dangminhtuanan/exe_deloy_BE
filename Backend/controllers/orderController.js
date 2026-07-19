@@ -5,6 +5,16 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const { getPayOSClient } = require("../config/payos");
 const { isStaffRole } = require("../middleware/roleMiddleware");
+const {
+  PAYMENT_STATUS,
+  PAYMENT_TARGET,
+  findPaymentByOrderCode,
+  generateUniquePayOSOrderCode,
+  getPaymentTarget,
+  markPaymentTerminated,
+  normalizePaymentStatus,
+  reconcilePayment,
+} = require("../services/payosPaymentService");
 
 function canAccessOrder(req, order) {
   return isStaffRole(req.user?.role) || String(order.user._id || order.user) === String(req.user.id);
@@ -71,16 +81,6 @@ function calculateCheckoutTotals(orderItems) {
     shippingFee,
     totalAmount: subtotal + tax + shippingFee,
   };
-}
-
-function moveOrderAfterPaid(order) {
-  if (["PENDING_PAYMENT", "pending", "PAID"].includes(order.status)) {
-    order.status = "confirmed";
-  }
-}
-
-function generatePayOSOrderCode() {
-  return Number(`${Date.now()}${Math.floor(Math.random() * 90 + 10)}`);
 }
 
 async function buildItemsFromServerCart(userId) {
@@ -164,11 +164,12 @@ exports.createOrder = async (req, res) => {
 
     const paymentProvider = req.body.paymentProvider || "cod";
     const payment = await Payment.create({
+      targetType: PAYMENT_TARGET.ORDER,
       order: order._id,
       user: req.user.id,
       provider: paymentProvider,
       amount: totals.totalAmount,
-      status: "pending",
+      status: PAYMENT_STATUS.PENDING,
     });
 
     order.payment = payment._id;
@@ -231,7 +232,10 @@ exports.createPayOSCheckout = async (req, res) => {
     }
 
     const totals = calculateCheckoutTotals(orderItems);
-    const orderCode = generatePayOSOrderCode();
+    if (!Number.isSafeInteger(totals.totalAmount) || totals.totalAmount <= 0) {
+      return res.status(400).json({ message: "Order total must be a positive VND integer" });
+    }
+    const orderCode = await generateUniquePayOSOrderCode();
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
     const payOS = getPayOSClient();
 
@@ -252,6 +256,7 @@ exports.createPayOSCheckout = async (req, res) => {
     });
 
     const payment = await Payment.create({
+      targetType: PAYMENT_TARGET.ORDER,
       order: order._id,
       user: req.user.id,
       provider: "PAYOS",
@@ -263,22 +268,33 @@ exports.createPayOSCheckout = async (req, res) => {
     order.payment = payment._id;
     await order.save();
 
-    const paymentLink = await payOS.paymentRequests.create({
-      orderCode,
-      amount: totals.totalAmount,
-      description: `OUTFIO${orderCode}`,
-      items: orderItems.map((item) => ({
-        name: item.name.slice(0, 100),
-        quantity: item.quantity,
-        price: item.price,
-      })),
-      buyerName: customerName,
-      buyerEmail: email,
-      buyerPhone: phone,
-      buyerAddress: address,
-      returnUrl: `${frontendUrl}/payment/return?orderCode=${orderCode}`,
-      cancelUrl: `${frontendUrl}/payment/cancel?orderCode=${orderCode}`,
-    });
+    let paymentLink;
+    try {
+      paymentLink = await payOS.paymentRequests.create({
+        orderCode,
+        amount: totals.totalAmount,
+        description: `OUTFIO${orderCode}`,
+        items: orderItems.map((item) => ({
+          name: item.name.slice(0, 100),
+          quantity: item.quantity,
+          price: item.price,
+        })),
+        buyerName: customerName,
+        buyerEmail: email,
+        buyerPhone: phone,
+        buyerAddress: address,
+        returnUrl: `${frontendUrl}/payment/return`,
+        cancelUrl: `${frontendUrl}/payment/cancel`,
+      });
+    } catch (payosError) {
+      // Stock has not been reserved yet, so only close the records created for this failed attempt.
+      payment.status = PAYMENT_STATUS.FAILED;
+      payment.stockRestoredAt = new Date();
+      order.status = "FAILED";
+      order.paymentStatus = "failed";
+      await Promise.all([payment.save(), order.save()]);
+      throw payosError;
+    }
 
     payment.paymentLinkId = paymentLink.paymentLinkId || "";
     payment.checkoutUrl = paymentLink.checkoutUrl;
@@ -303,61 +319,39 @@ exports.createPayOSCheckout = async (req, res) => {
 
 exports.getPaymentStatusByOrderCode = async (req, res) => {
   try {
-    const orderCode = Number(req.params.orderCode);
-    if (!Number.isSafeInteger(orderCode)) {
-      return res.status(400).json({ message: "Order code is invalid" });
+    let payment = await findPaymentByOrderCode(req.params.orderCode);
+    if (!payment || getPaymentTarget(payment) !== PAYMENT_TARGET.ORDER) {
+      return res.status(404).json({ message: "Order payment not found" });
     }
 
-    const payment = await Payment.findOne({ orderCode }).populate("order");
-    if (!payment) {
-      return res.status(404).json({ message: "Payment not found" });
+    if (String(payment.user) !== String(req.user.id) && !isStaffRole(req.user?.role)) {
+      return res.status(403).json({ message: "Permission denied" });
     }
 
-    if (payment.status === "PENDING" && process.env.PAYOS_CLIENT_ID) {
+    let reconciliationWarning = null;
+    if (normalizePaymentStatus(payment.status) === PAYMENT_STATUS.PENDING) {
       try {
-        const payOS = getPayOSClient();
-        const paymentLink = await payOS.paymentRequests.get(orderCode);
-
-        if (paymentLink.status === "PAID" && Number(paymentLink.amount) === Number(payment.amount)) {
-          payment.status = "PAID";
-          payment.paidAt = payment.paidAt || new Date();
-          payment.rawResponse = paymentLink;
-          await payment.save();
-
-          if (payment.order) {
-            moveOrderAfterPaid(payment.order);
-            payment.order.paymentStatus = "paid";
-            await payment.order.save();
-          }
-        } else if (["CANCELLED", "FAILED", "EXPIRED"].includes(paymentLink.status)) {
-          payment.status = paymentLink.status === "CANCELLED" ? "CANCELLED" : "FAILED";
-          payment.rawResponse = paymentLink;
-          await payment.save();
-
-          if (payment.order) {
-            if (!["cancelled", "refunded", "completed"].includes(payment.order.status)) {
-              await restoreOrderStock(payment.order);
-            }
-            payment.order.status = "cancelled";
-            payment.order.paymentStatus = "failed";
-            await payment.order.save();
-          }
-        }
-      } catch {
-        // Keep the locally verified status if payOS status lookup is unavailable.
+        payment = await reconcilePayment(payment);
+      } catch (error) {
+        reconciliationWarning = error.message;
       }
     }
+
+    await payment.populate("order");
 
     res.json({
       message: "Get payment status successfully",
       orderCode: payment.orderCode,
-      paymentStatus: payment.status,
+      paymentId: payment._id,
+      paymentStatus: normalizePaymentStatus(payment.status),
       orderStatus: payment.order?.status,
       amount: payment.amount,
       orderId: payment.order?._id,
+      paidAt: payment.paidAt,
+      ...(reconciliationWarning ? { reconciliationWarning } : {}),
     });
   } catch (error) {
-    res.status(500).json({ message: "Cannot get payment status", error: error.message });
+    res.status(error.statusCode || 500).json({ message: "Cannot get payment status", error: error.message });
   }
 };
 
@@ -457,14 +451,31 @@ exports.updateOrderStatus = async (req, res) => {
 
 exports.cancelMyOrder = async (req, res) => {
   try {
-    const order = await Order.findOne({ _id: req.params.id, user: req.user.id });
+    let order = await Order.findOne({ _id: req.params.id, user: req.user.id });
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (!["pending", "confirmed"].includes(order.status)) {
+    if (!["pending", "confirmed", "PENDING_PAYMENT"].includes(order.status)) {
       return res.status(400).json({ message: "Order cannot be cancelled" });
+    }
+
+    const payment = order.payment ? await Payment.findById(order.payment) : null;
+    if (payment && normalizePaymentStatus(payment.status) === PAYMENT_STATUS.PAID) {
+      return res.status(409).json({ message: "Paid orders require the staff refund workflow" });
+    }
+
+    if (payment) {
+      let payOSResponse = null;
+      if (payment.provider === "PAYOS" && payment.orderCode) {
+        const payOS = getPayOSClient();
+        payOSResponse = await payOS.paymentRequests.cancel(payment.orderCode, "Customer cancelled order");
+      }
+
+      await markPaymentTerminated(payment, PAYMENT_STATUS.CANCELLED, payOSResponse);
+      order = await Order.findById(order._id);
+      return res.json({ message: "Cancel order successfully", order });
     }
 
     await restoreOrderStock(order);

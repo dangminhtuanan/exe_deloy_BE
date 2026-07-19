@@ -55,7 +55,33 @@ From this folder:
 vercel --prod
 ```
 
-## 4. Test
+## 4. Confirm the payOS webhook
+
+The canonical webhook for both shop orders and AI packages is:
+
+```txt
+https://your-backend.vercel.app/api/payos/webhook
+```
+
+After `BACKEND_URL` and the three `PAYOS_*` variables are available locally, register and validate it with:
+
+```bash
+npm run payos:confirm-webhook
+```
+
+For an existing database created before the unified `Payment` model, run this once before confirming the webhook:
+
+```bash
+npm run payos:migrate-payments
+```
+
+Run this again whenever the production backend URL or payOS payment channel changes. The legacy
+`/api/ai-packages/webhook/payos` path remains an alias, but must not be configured as a second webhook.
+
+MongoDB must be a replica set (MongoDB Atlas satisfies this) because payment fulfillment uses database
+transactions to guarantee that duplicate webhooks cannot grant AI credits twice.
+
+## 5. Test
 
 Open:
 
@@ -75,3 +101,4 @@ https://your-backend.vercel.app/api/products
 
 - Do not upload `.env` to git.
 - Avatar upload using local `/image` storage is not durable on Vercel serverless. Prefer the Cloudinary upload endpoint `/api/upload`.
+- See `PAYOS_INTEGRATION.md` for the frontend return-page and polling contract.

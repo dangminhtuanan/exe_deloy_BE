@@ -80,8 +80,8 @@
  *           type: string
  *         status:
  *           type: string
- *           enum: [pending, paid, failed, cancelled, PENDING, PAID, CANCELLED, FAILED]
- *           example: pending
+ *           enum: [PENDING, PAID, CANCELLED, FAILED]
+ *           example: PENDING
  *         transactionNo:
  *           type: string
  *         paidAt:
@@ -306,9 +306,29 @@
  *                   type: string
  *                 balance:
  *                   type: number
- *                   example: 25
+ *                   example: 13
+ *                 monthlyAiCredits:
+ *                   type: number
+ *                   description: Free credits remaining in the current month
+ *                   example: 3
+ *                 paidAiCredits:
+ *                   type: number
+ *                   description: Purchased or admin-granted credits that do not expire monthly
+ *                   example: 10
  *                 userId:
  *                   type: string
+ *                 monthlyGrant:
+ *                   type: object
+ *                   properties:
+ *                     granted:
+ *                       type: boolean
+ *                       description: True when this request granted the user's monthly credits
+ *                     credits:
+ *                       type: integer
+ *                       example: 3
+ *                     period:
+ *                       type: string
+ *                       example: "2026-07"
  *       401:
  *         description: Unauthorized
  * 
@@ -339,6 +359,8 @@
  *                   properties:
  *                     id:
  *                       type: string
+ *                     paymentId:
+ *                       type: string
  *                     orderCode:
  *                       type: number
  *                     checkoutUrl:
@@ -355,6 +377,28 @@
  *       401:
  *         description: Unauthorized
  * 
+ * /ai-packages/payment-status/{orderCode}:
+ *   get:
+ *     summary: Reconcile and get an AI package payment status
+ *     description: Uses the local status first and asks payOS when the payment is still pending.
+ *     tags: [AI Packages]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderCode
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           format: int64
+ *     responses:
+ *       200:
+ *         description: Current canonical payment status
+ *       403:
+ *         description: Payment belongs to another user
+ *       404:
+ *         description: AI package payment not found
+ *
  * /ai-packages/transaction/{transactionId}:
  *   get:
  *     summary: Get transaction details
@@ -410,6 +454,10 @@
  *                   type: number
  *                 remainingBalance:
  *                   type: number
+ *                 monthlyAiCredits:
+ *                   type: number
+ *                 paidAiCredits:
+ *                   type: number
  *       400:
  *         description: Insufficient credits or invalid amount
  *       401:
@@ -464,6 +512,10 @@
  *                   type: string
  *                 newBalance:
  *                   type: number
+ *                 monthlyAiCredits:
+ *                   type: number
+ *                 paidAiCredits:
+ *                   type: number
  *       400:
  *         description: Invalid userId or credits
  *       404:
@@ -473,7 +525,9 @@
  * 
  * /ai-packages/webhook/payos:
  *   post:
- *     summary: PayOS webhook callback (no auth needed)
+ *     summary: Deprecated alias for the unified PayOS webhook
+ *     deprecated: true
+ *     description: Configure payOS to use /payos/webhook instead.
  *     tags: [AI Packages]
  *     requestBody:
  *       required: true
@@ -515,8 +569,6 @@
  *         description: Webhook processed successfully
  *       400:
  *         description: Invalid webhook or amount mismatch
- *       404:
- *         description: Transaction not found
  */
 
 const express = require("express");
@@ -530,11 +582,12 @@ const {
   getMyCreditsBalance,
   purchasePackage,
   getTransactionDetails,
+  getPackagePaymentStatus,
   getAllTransactions,
-  handlePaymentWebhook,
   addCreditsToUser,
   useAiCredits,
 } = require("../controllers/aiPackageController");
+const { handlePayOSWebhook } = require("../controllers/payosController");
 const authMiddleware = require("../middleware/authMiddleware");
 const { requireRoles } = require("../middleware/roleMiddleware");
 
@@ -547,6 +600,7 @@ router.get("/packages", getAvailablePackages);
 router.get("/my/transactions", authMiddleware, getMyTransactions);
 router.get("/my/balance", authMiddleware, getMyCreditsBalance);
 router.post("/purchase", authMiddleware, purchasePackage);
+router.get("/payment-status/:orderCode", authMiddleware, getPackagePaymentStatus);
 router.get("/transaction/:transactionId", authMiddleware, getTransactionDetails);
 router.post("/use-credits", authMiddleware, useAiCredits);
 
@@ -560,7 +614,7 @@ router.delete("/packages/:id", authMiddleware, requireRoles("admin", "manager"),
 router.get("/transactions", authMiddleware, requireRoles("admin", "manager"), getAllTransactions);
 router.post("/add-credits", authMiddleware, requireRoles("admin", "manager"), addCreditsToUser);
 
-// Webhook - PayOS payment callback
-router.post("/webhook/payos", handlePaymentWebhook);
+// Backward-compatible alias. Configure payOS with the canonical /api/payos/webhook URL.
+router.post("/webhook/payos", handlePayOSWebhook);
 
 module.exports = router;
