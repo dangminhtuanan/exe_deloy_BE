@@ -4,7 +4,10 @@
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test",
+    "payos:confirm-webhook": "node scripts/confirmPayOSWebhook.js",
+    "payos:migrate-payments": "node scripts/migratePayOSPayments.js"
   },
   "keywords": [],
   "author": "",

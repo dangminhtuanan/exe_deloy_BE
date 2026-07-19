@@ -920,6 +920,7 @@ exports.createTryOn = async (req, res) => {
   try {
     const modelImageUrl = String(req.body.modelImageUrl || "").trim();
     const requestedClothingImageUrl = String(req.body.clothingImageUrl || "").trim();
+    const lowerClothingImageUrl = String(req.body.lowerClothingImageUrl || "").trim();
     const productId = req.body.productId || null;
     const clothType = normalizeFitroomClothType(req.body.clothType || "upper");
     const hdMode = req.body.hdMode === true || req.body.hdMode === "true";
@@ -937,6 +938,9 @@ exports.createTryOn = async (req, res) => {
     if (!clothingImageUrl) {
       return res.status(400).json({ message: "Clothing image URL is required" });
     }
+    if (clothType === "combo" && !lowerClothingImageUrl) {
+      return res.status(400).json({ message: "Lower clothing image URL is required for combo try-on" });
+    }
 
     outfitLog = await AIOutfitRecommendation.create({
       user: req.user?.id || null,
@@ -947,18 +951,25 @@ exports.createTryOn = async (req, res) => {
       hdMode,
       status: "CREATED",
       progress: 0,
+      rawResponse: {
+        lowerClothingImageUrl: lowerClothingImageUrl || "",
+      },
     });
 
     const task = await createFitroomTask({
       modelImageUrl,
       clothingImageUrl,
+      lowerClothingImageUrl,
       clothType,
       hdMode,
     });
 
     outfitLog.taskId = task.task_id || task.id || "";
     outfitLog.status = task.status || "CREATED";
-    outfitLog.rawResponse = task;
+    outfitLog.rawResponse = {
+      ...task,
+      lowerClothingImageUrl: lowerClothingImageUrl || "",
+    };
     await outfitLog.save();
 
     const taskStatus = await waitForFitroomResult(outfitLog.taskId);
@@ -974,6 +985,7 @@ exports.createTryOn = async (req, res) => {
         ...taskStatus,
         download_signed_url: signedResultImageUrl,
         persisted_result_url: persistedResultImageUrl,
+        lowerClothingImageUrl: lowerClothingImageUrl || "",
       };
       await outfitLog.save();
     }

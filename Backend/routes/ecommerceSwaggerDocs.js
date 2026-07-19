@@ -126,7 +126,7 @@
  *           example: Giao buoi toi
  *         paymentProvider:
  *           type: string
- *           enum: [cod, momo, vnpay, bank_transfer, stripe, paypal]
+ *           enum: [cod, momo, vnpay, bank_transfer, stripe, paypal, PAYOS]
  *           example: cod
  *         items:
  *           type: array
@@ -166,7 +166,7 @@
  *           example: 662a22222222222222222222
  *         provider:
  *           type: string
- *           enum: [cod, momo, vnpay, bank_transfer, stripe, paypal]
+ *           enum: [cod, momo, vnpay, bank_transfer, stripe, paypal, PAYOS]
  *           example: cod
  *         transactionNo:
  *           type: string
@@ -176,8 +176,8 @@
  *       properties:
  *         status:
  *           type: string
- *           enum: [pending, paid, failed, refunded]
- *           example: paid
+ *           enum: [PENDING, PAID, CANCELLED, FAILED, REFUNDED]
+ *           example: PAID
  *         transactionNo:
  *           type: string
  *           example: TXN-001
@@ -650,8 +650,10 @@
  *
  * /orders/payment-status/{orderCode}:
  *   get:
- *     summary: Get payment status by PayOS order code
+ *     summary: Reconcile and get payment status by PayOS order code
  *     tags: [Order]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: orderCode

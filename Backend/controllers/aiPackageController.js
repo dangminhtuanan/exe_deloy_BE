@@ -1,8 +1,24 @@
 const AIPackage = require("../models/AIPackage");
 const AITransaction = require("../models/AITransaction");
+const Payment = require("../models/Payment");
 const User = require("../models/User");
 const { getPayOSClient } = require("../config/payos");
 const { isStaffRole } = require("../middleware/roleMiddleware");
+const {
+  addPaidAiCredits,
+  deductAiCredits,
+  getAiCreditBalance,
+  grantMonthlyAiCredits,
+} = require("../services/monthlyAiCreditService");
+const {
+  PAYMENT_STATUS,
+  PAYMENT_TARGET,
+  findPaymentByOrderCode,
+  generateUniquePayOSOrderCode,
+  getPaymentTarget,
+  normalizePaymentStatus,
+  reconcilePayment,
+} = require("../services/payosPaymentService");
 
 // Public: Get all available AI packages
 exports.getAvailablePackages = async (req, res) => {
@@ -96,6 +112,7 @@ exports.getMyTransactions = async (req, res) => {
   try {
     const transactions = await AITransaction.find({ user: req.user.id })
       .populate("package", "name credits price")
+      .populate("payment")
       .sort({ createdAt: -1 });
 
     res.json({ message: "Get transactions successfully", transactions });
@@ -107,16 +124,26 @@ exports.getMyTransactions = async (req, res) => {
 // User: Get their AI credits balance
 exports.getMyCreditsBalance = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id);
+    const monthlyGrant = await grantMonthlyAiCredits(req.user.id);
+    const user = monthlyGrant.user;
 
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
+    const creditBalance = getAiCreditBalance(user);
+
     res.json({
-      message: "Get credits balance successfully",
-      balance: user.aiCredits || 0,
+      message: "AI credits balance retrieved successfully",
+      balance: creditBalance.balance,
+      monthlyAiCredits: creditBalance.monthlyAiCredits,
+      paidAiCredits: creditBalance.paidAiCredits,
       userId: user._id,
+      monthlyGrant: {
+        granted: monthlyGrant.granted,
+        credits: monthlyGrant.creditsGranted,
+        period: monthlyGrant.period,
+      },
     });
   } catch (error) {
     res.status(500).json({ message: "Cannot get credits balance", error: error.message });
@@ -142,62 +169,81 @@ exports.purchasePackage = async (req, res) => {
       return res.status(404).json({ message: "User not found" });
     }
 
-    // Create transaction
+    const amount = Math.round(Number(aiPackage.price));
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      return res.status(400).json({ message: "Package price must be a positive VND integer" });
+    }
+
+    const orderCode = await generateUniquePayOSOrderCode();
+
+    // AITransaction stores package fulfillment; Payment owns the shared payOS lifecycle.
     const transaction = await AITransaction.create({
       user: user._id,
       package: aiPackage._id,
-      amount: aiPackage.price,
+      amount,
       credits: aiPackage.credits,
       provider: "PAYOS",
-      status: "pending",
+      orderCode,
+      status: PAYMENT_STATUS.PENDING,
     });
 
-    // Generate PayOS order code (timestamp-based, unique)
-    const orderCode = Math.floor(Date.now() / 1000);
-    transaction.orderCode = orderCode;
-    await transaction.save();
-
+    let payment = null;
     try {
-      // Create payment link with PayOS
+      payment = await Payment.create({
+        targetType: PAYMENT_TARGET.AI_PACKAGE,
+        aiTransaction: transaction._id,
+        user: user._id,
+        provider: "PAYOS",
+        orderCode,
+        amount,
+        status: PAYMENT_STATUS.PENDING,
+      });
+      transaction.payment = payment._id;
+      await transaction.save();
+
       const payOS = getPayOSClient();
       const paymentLinkData = {
-        orderCode: orderCode,
-        amount: Math.round(aiPackage.price),
-        description: `AI Package: ${aiPackage.name}`,
+        orderCode,
+        amount,
+        description: `AIPKG${orderCode}`,
         items: [
           {
-            name: aiPackage.name,
+            name: aiPackage.name.slice(0, 100),
             quantity: 1,
-            price: Math.round(aiPackage.price),
+            price: amount,
           },
         ],
         buyerEmail: user.email,
         buyerName: user.username,
-        buyerPhone: user.phone || "",
-        returnUrl: `${process.env.FRONTEND_URL || "http://localhost:5173"}/ai/payment-result?orderCode=${orderCode}`,
-        cancelUrl: `${process.env.FRONTEND_URL || "http://localhost:5173"}/ai/cancel?orderCode=${orderCode}`,
+        ...(user.phone ? { buyerPhone: user.phone } : {}),
+        returnUrl: `${process.env.FRONTEND_URL || "http://localhost:5173"}/ai/payment-result`,
+        cancelUrl: `${process.env.FRONTEND_URL || "http://localhost:5173"}/ai/cancel`,
       };
 
       const paymentLink = await payOS.paymentRequests.create(paymentLinkData);
 
+      payment.paymentLinkId = paymentLink.paymentLinkId || "";
+      payment.checkoutUrl = paymentLink.checkoutUrl;
+      payment.rawResponse = paymentLink;
       transaction.paymentLinkId = paymentLink.paymentLinkId || "";
       transaction.checkoutUrl = paymentLink.checkoutUrl;
-      await transaction.save();
+      await Promise.all([payment.save(), transaction.save()]);
 
       res.status(201).json({
         message: "Payment link created successfully",
         transaction: {
           id: transaction._id,
-          orderCode: transaction.orderCode,
+          paymentId: payment._id,
+          orderCode,
           checkoutUrl: paymentLink.checkoutUrl,
           amount: transaction.amount,
           packageName: aiPackage.name,
         },
       });
     } catch (payosError) {
-      // If PayOS fails, mark transaction as failed
-      transaction.status = "failed";
-      await transaction.save();
+      transaction.status = PAYMENT_STATUS.FAILED;
+      if (payment) payment.status = PAYMENT_STATUS.FAILED;
+      await Promise.all([transaction.save(), ...(payment ? [payment.save()] : [])]);
 
       res.status(500).json({
         message: "Failed to create payment link",
@@ -214,10 +260,9 @@ exports.getTransactionDetails = async (req, res) => {
   try {
     const { transactionId } = req.params;
 
-    const transaction = await AITransaction.findById(transactionId).populate(
-      "package",
-      "name credits features price"
-    );
+    const transaction = await AITransaction.findById(transactionId)
+      .populate("package", "name credits features price")
+      .populate("payment");
 
     if (!transaction) {
       return res.status(404).json({ message: "Transaction not found" });
@@ -238,12 +283,16 @@ exports.getTransactionDetails = async (req, res) => {
 exports.getAllTransactions = async (req, res) => {
   try {
     const filter = {};
-    if (req.query.status) filter.status = req.query.status;
+    if (req.query.status) {
+      const status = normalizePaymentStatus(req.query.status);
+      filter.status = { $in: [status, status.toLowerCase()] };
+    }
     if (req.query.provider) filter.provider = req.query.provider;
 
     const transactions = await AITransaction.find(filter)
       .populate("user", "username email phone")
       .populate("package", "name credits price")
+      .populate("payment")
       .sort({ createdAt: -1 });
 
     res.json({ message: "Get all transactions successfully", transactions });
@@ -252,64 +301,53 @@ exports.getAllTransactions = async (req, res) => {
   }
 };
 
-// PayOS Webhook: Handle payment confirmation
-exports.handlePaymentWebhook = async (req, res) => {
-
-    if (!req.body || Object.keys(req.body).length === 0) {
-    return res.status(400).json({ 
-      message: "Lỗi: Request Body trống rỗng! Vui lòng nhập dữ liệu đơn hàng trước khi bấm Execute." 
-    });
-  }
-  
-  let webhookData;
-  webhookData = req.body.data || req.body;
-
-//   try {
-//     const payOS = getPayOSClient();
-//     webhookData = await payOS.webhooks.verify(req.body);
-//   } catch (error) {
-//     return res.status(400).json({ message: "Invalid PayOS webhook", error: error.message });
-//   }
-
+// User: Reconcile and get AI package payment status by payOS order code.
+exports.getPackagePaymentStatus = async (req, res) => {
   try {
-    const transaction = await AITransaction.findOne({ orderCode: webhookData.orderCode });
-
-    if (!transaction) {
-      return res.status(404).json({ message: "Transaction not found" });
+    let payment = await findPaymentByOrderCode(req.params.orderCode);
+    if (!payment || getPaymentTarget(payment) !== PAYMENT_TARGET.AI_PACKAGE) {
+      return res.status(404).json({ message: "AI package payment not found" });
     }
 
-    if (Number(webhookData.amount) !== Number(transaction.amount)) {
-      return res.status(400).json({ message: "Payment amount does not match" });
+    if (String(payment.user) !== String(req.user.id) && !isStaffRole(req.user?.role)) {
+      return res.status(403).json({ message: "Permission denied" });
     }
 
-    transaction.rawWebhookPayload = req.body;
-    transaction.paymentLinkId = webhookData.paymentLinkId || transaction.paymentLinkId;
-    transaction.transactionReference = webhookData.reference || transaction.transactionReference;
-    transaction.transactionNo = webhookData.reference || transaction.transactionNo;
-
-    const isSuccessful = req.body.success === true && req.body.code === "00" && webhookData.code === "00";
-
-    if (isSuccessful) {
-      transaction.status = "PAID";
-      transaction.paidAt = webhookData.transactionDateTime
-        ? new Date(webhookData.transactionDateTime)
-        : new Date();
-
-      // Add credits to user
-      const user = await User.findById(transaction.user);
-      if (user) {
-        user.aiCredits = (user.aiCredits || 0) + transaction.credits;
-        await user.save();
+    let reconciliationWarning = null;
+    if (normalizePaymentStatus(payment.status) === PAYMENT_STATUS.PENDING) {
+      try {
+        payment = await reconcilePayment(payment);
+      } catch (error) {
+        reconciliationWarning = error.message;
       }
-    } else {
-      transaction.status = "FAILED";
     }
 
-    await transaction.save();
+    const transaction = payment.aiTransaction
+      ? await AITransaction.findById(payment.aiTransaction).populate("package", "name credits price")
+      : await AITransaction.findOne({ orderCode: payment.orderCode }).populate("package", "name credits price");
+    const monthlyGrant = await grantMonthlyAiCredits(payment.user);
+    const paymentUser = monthlyGrant.user;
+    const creditBalance = getAiCreditBalance(paymentUser);
 
-    res.sendStatus(200);
+    return res.json({
+      message: "Get AI package payment status successfully",
+      orderCode: payment.orderCode,
+      paymentId: payment._id,
+      transactionId: transaction?._id || null,
+      paymentStatus: normalizePaymentStatus(payment.status),
+      amount: payment.amount,
+      credits: transaction?.credits || 0,
+      balance: creditBalance.balance,
+      monthlyAiCredits: creditBalance.monthlyAiCredits,
+      paidAiCredits: creditBalance.paidAiCredits,
+      paidAt: payment.paidAt,
+      ...(reconciliationWarning ? { reconciliationWarning } : {}),
+    });
   } catch (error) {
-    res.status(500).json({ message: "Cannot handle webhook", error: error.message });
+    return res.status(error.statusCode || 500).json({
+      message: "Cannot get AI package payment status",
+      error: error.message,
+    });
   }
 };
 
@@ -317,23 +355,27 @@ exports.handlePaymentWebhook = async (req, res) => {
 exports.addCreditsToUser = async (req, res) => {
   try {
     const { userId, credits, reason = "Admin addition" } = req.body;
+    const creditsToAdd = Number(credits);
 
-    if (!userId || !credits || credits <= 0) {
+    if (!userId || !Number.isSafeInteger(creditsToAdd) || creditsToAdd <= 0) {
       return res.status(400).json({ message: "Invalid userId or credits" });
     }
 
-    const user = await User.findById(userId);
+    const user = await addPaidAiCredits(userId, creditsToAdd);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    user.aiCredits = (user.aiCredits || 0) + credits;
-    await user.save();
+    const creditBalance = getAiCreditBalance(user);
 
     res.json({
       message: "Credits added successfully",
       userId: user._id,
-      newBalance: user.aiCredits,
+      creditsAdded: creditsToAdd,
+      reason,
+      newBalance: creditBalance.balance,
+      monthlyAiCredits: creditBalance.monthlyAiCredits,
+      paidAiCredits: creditBalance.paidAiCredits,
     });
   } catch (error) {
     res.status(500).json({ message: "Cannot add credits", error: error.message });
@@ -343,33 +385,41 @@ exports.addCreditsToUser = async (req, res) => {
 // User: Use AI credits
 exports.useAiCredits = async (req, res) => {
   try {
-    const { credits = 1 } = req.body;
+    const credits = Number(req.body.credits ?? 1);
 
-    if (credits <= 0) {
-      return res.status(400).json({ message: "Credits must be greater than 0" });
+    if (!Number.isSafeInteger(credits) || credits <= 0) {
+      return res.status(400).json({ message: "Credits must be a positive integer" });
     }
 
-    const user = await User.findById(req.user.id);
-    if (!user) {
+    const deduction = await deductAiCredits(req.user.id, credits);
+    if (!deduction.monthlyGrant.user) {
       return res.status(404).json({ message: "User not found" });
     }
 
-    const currentBalance = user.aiCredits || 0;
-    if (currentBalance < credits) {
+    if (!deduction.user) {
+      if (!deduction.currentUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      const currentBalance = getAiCreditBalance(deduction.currentUser);
+
       return res.status(400).json({
         message: "Insufficient credits",
-        currentBalance,
+        currentBalance: currentBalance.balance,
+        monthlyAiCredits: currentBalance.monthlyAiCredits,
+        paidAiCredits: currentBalance.paidAiCredits,
         required: credits,
       });
     }
 
-    user.aiCredits = currentBalance - credits;
-    await user.save();
+    const remaining = getAiCreditBalance(deduction.user);
 
     res.json({
       message: "Credits used successfully",
       creditsUsed: credits,
-      remainingBalance: user.aiCredits,
+      remainingBalance: remaining.balance,
+      monthlyAiCredits: remaining.monthlyAiCredits,
+      paidAiCredits: remaining.paidAiCredits,
     });
   } catch (error) {
     res.status(500).json({ message: "Cannot use credits", error: error.message });

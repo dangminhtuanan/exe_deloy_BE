@@ -27,6 +27,11 @@ const aiTransactionSchema = new mongoose.Schema(
       enum: ["cod", "momo", "vnpay", "bank_transfer", "stripe", "paypal", "PAYOS"],
       default: "PAYOS",
     },
+    payment: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payment",
+      default: null,
+    },
     orderCode: {
       type: Number,
       unique: true,
@@ -44,8 +49,8 @@ const aiTransactionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "paid", "failed", "cancelled", "PENDING", "PAID", "CANCELLED", "FAILED"],
-      default: "pending",
+      enum: ["PENDING", "PAID", "CANCELLED", "FAILED"],
+      default: "PENDING",
     },
     transactionNo: {
       type: String,
@@ -58,6 +63,10 @@ const aiTransactionSchema = new mongoose.Schema(
       trim: true,
     },
     paidAt: {
+      type: Date,
+      default: null,
+    },
+    creditsGrantedAt: {
       type: Date,
       default: null,
     },
@@ -77,5 +86,19 @@ const aiTransactionSchema = new mongoose.Schema(
 // Index for efficient queries
 aiTransactionSchema.index({ user: 1, createdAt: -1 });
 aiTransactionSchema.index({ status: 1 });
+
+aiTransactionSchema.set("toJSON", {
+  transform(document, returnedObject) {
+    if (returnedObject.status) returnedObject.status = String(returnedObject.status).toUpperCase();
+    return returnedObject;
+  },
+});
+
+aiTransactionSchema.pre("validate", function normalizeStatus(next) {
+  if (this.status) {
+    this.status = String(this.status).toUpperCase();
+  }
+  next();
+});
 
 module.exports = mongoose.model("AITransaction", aiTransactionSchema);
