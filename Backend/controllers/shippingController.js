@@ -2,6 +2,7 @@ const Shipping = require("../models/Shipping");
 const Order = require("../models/Order");
 const User = require("../models/User");
 const { isStaffRole } = require("../middleware/roleMiddleware");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 
 function canAccessShipping(req, shipping) {
   const order = shipping.order;
@@ -38,14 +39,21 @@ exports.getAllShippings = async (req, res) => {
       filter.shippingStatus = req.query.status;
     }
 
-    const shippings = await Shipping.find(filter)
-      .populate("order")
-      .populate("shipper", "username email phone")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const [shippings, total] = await Promise.all([
+      Shipping.find(filter)
+        .populate("order")
+        .populate("shipper", "username email phone")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Shipping.countDocuments(filter),
+    ]);
 
     res.json({
       success: true,
       data: shippings,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
     });
   } catch (error) {
     res.status(500).json({
@@ -387,19 +395,26 @@ exports.getShipperShipments = async (req, res) => {
       });
     }
 
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
     let filter = { shipper: shipperId };
     if (status) {
       filter.shippingStatus = status;
     }
 
-    const shippings = await Shipping.find(filter)
-      .populate("order")
-      .populate("shipper", "username email phone")
-      .sort({ createdAt: -1 });
+    const [shippings, total] = await Promise.all([
+      Shipping.find(filter)
+        .populate("order")
+        .populate("shipper", "username email phone")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Shipping.countDocuments(filter),
+    ]);
 
     res.json({
       success: true,
       data: shippings,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
     });
   } catch (error) {
     res.status(500).json({
@@ -425,19 +440,26 @@ exports.getMyShipments = async (req, res) => {
       });
     }
 
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
     let filter = { shipper: userId };
     if (status) {
       filter.shippingStatus = status;
     }
 
-    const shippings = await Shipping.find(filter)
-      .populate("order")
-      .populate("shipper", "username email phone")
-      .sort({ createdAt: -1 });
+    const [shippings, total] = await Promise.all([
+      Shipping.find(filter)
+        .populate("order")
+        .populate("shipper", "username email phone")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Shipping.countDocuments(filter),
+    ]);
 
     res.json({
       success: true,
       data: shippings,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
     });
   } catch (error) {
     res.status(500).json({

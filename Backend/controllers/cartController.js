@@ -1,13 +1,38 @@
 const CartItem = require("../models/CartItem");
 const Product = require("../models/Product");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 
-async function getUserCartItems(userId) {
-  return CartItem.find({ user: userId })
-    .populate({
-      path: "product",
-      populate: { path: "category", select: "name slug" },
-    })
-    .sort({ updatedAt: -1 });
+const MAX_CART_ITEMS = Number(process.env.CART_MAX_ITEMS) || 100; // max distinct products per cart
+const CART_PAGINATION_TRIGGER = 50; // if user has more than this, force pagination
+
+async function getUserCartItems(userId, { skip, limit } = {}) {
+  const query = CartItem.find({ user: userId }).populate({
+    path: "product",
+    populate: { path: "category", select: "name slug" },
+  }).sort({ updatedAt: -1 });
+
+  if (typeof skip !== "undefined" && typeof limit !== "undefined") {
+    query.skip(skip).limit(limit);
+  }
+
+  return query;
+}
+
+async function buildCartResponse(req, userId) {
+  const total = await CartItem.countDocuments({ user: userId });
+  const shouldPaginate = typeof req.query.page !== "undefined" || typeof req.query.limit !== "undefined" || total > CART_PAGINATION_TRIGGER;
+
+  if (shouldPaginate) {
+    const pagination = parsePagination(req, { defaultLimit: 20, maxLimit: 200 });
+    const items = await getUserCartItems(userId, { skip: pagination.skip, limit: pagination.limit });
+    return {
+      cart: buildCartSummary(items),
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    };
+  }
+
+  const items = await getUserCartItems(userId);
+  return { cart: buildCartSummary(items) };
 }
 
 function buildCartSummary(items) {
@@ -25,8 +50,8 @@ function buildCartSummary(items) {
 
 exports.getCart = async (req, res) => {
   try {
-    const items = await getUserCartItems(req.user.id);
-    res.json({ message: "Get cart successfully", cart: buildCartSummary(items) });
+    const result = await buildCartResponse(req, req.user.id);
+    res.json({ message: "Get cart successfully", ...result });
   } catch (error) {
     res.status(500).json({ message: "Cannot get cart", error: error.message });
   }
@@ -65,6 +90,11 @@ exports.addCartItem = async (req, res) => {
       existingItem.quantity = mergedQuantity;
       await existingItem.save();
     } else {
+      const uniqueCount = await CartItem.countDocuments({ user: req.user.id });
+      if (uniqueCount >= MAX_CART_ITEMS) {
+        return res.status(400).json({ message: `Cart item limit reached (${MAX_CART_ITEMS})` });
+      }
+
       await CartItem.create({
         user: req.user.id,
         product: product._id,
@@ -74,8 +104,8 @@ exports.addCartItem = async (req, res) => {
       });
     }
 
-    const items = await getUserCartItems(req.user.id);
-    res.status(201).json({ message: "Add cart item successfully", cart: buildCartSummary(items) });
+    const result = await buildCartResponse(req, req.user.id);
+    res.status(201).json({ message: "Add cart item successfully", ...result });
   } catch (error) {
     res.status(500).json({ message: "Cannot add cart item", error: error.message });
   }
@@ -106,8 +136,8 @@ exports.updateCartItem = async (req, res) => {
       await item.save();
     }
 
-    const items = await getUserCartItems(req.user.id);
-    res.json({ message: "Update cart item successfully", cart: buildCartSummary(items) });
+    const result = await buildCartResponse(req, req.user.id);
+    res.json({ message: "Update cart item successfully", ...result });
   } catch (error) {
     res.status(500).json({ message: "Cannot update cart item", error: error.message });
   }
@@ -121,8 +151,8 @@ exports.removeCartItem = async (req, res) => {
     }
 
     await item.deleteOne();
-    const items = await getUserCartItems(req.user.id);
-    res.json({ message: "Remove cart item successfully", cart: buildCartSummary(items) });
+    const result = await buildCartResponse(req, req.user.id);
+    res.json({ message: "Remove cart item successfully", ...result });
   } catch (error) {
     res.status(500).json({ message: "Cannot remove cart item", error: error.message });
   }

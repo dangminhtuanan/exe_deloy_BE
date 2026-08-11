@@ -1,6 +1,7 @@
 const User = require("../models/User");
 const validator = require("validator");
 const bcrypt = require("bcryptjs");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 const { getNormalizedEmail } = require("./authController");
 
 const USER_ROLES = ["user", "customer", "staff", "manager", "admin", "shipper"];
@@ -22,7 +23,14 @@ function getDuplicateFieldMessage(error) {
 // Lấy danh sách người dùng đang hoạt động (isActive=true, chỉ admin)
 exports.getAllUsers = async (req, res) => {
   try {
-    const usersRaw = await User.find({ isActive: true }).select("-password");
+    const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
+    const filter = { isActive: true };
+
+    const [usersRaw, total] = await Promise.all([
+      User.find(filter).select("-password").skip(pagination.skip).limit(pagination.limit),
+      User.countDocuments(filter),
+    ]);
+
     const users = usersRaw.map(user => ({
       _id: user._id,
       username: user.username,
@@ -34,9 +42,14 @@ exports.getAllUsers = async (req, res) => {
       updatedAt: user.updatedAt,
       __v: user.__v,
       refreshToken: user.refreshToken,
-      isActive: user.isActive
+      isActive: user.isActive,
     }));
-    res.json({ message: "Lấy danh sách người dùng thành công", users });
+
+    res.json({
+      message: "Lấy danh sách người dùng thành công",
+      users,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Đã xảy ra lỗi khi lấy danh sách người dùng", error });
   }

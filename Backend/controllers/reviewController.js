@@ -39,14 +39,26 @@ async function updateProductRating(productId) {
 
 exports.getProductReviews = async (req, res) => {
   try {
-    const reviews = await Review.find({
+    const pagination = parsePagination(req, { defaultLimit: 20, maxLimit: 100 });
+    const filter = {
       product: req.params.productId,
       isVisible: true,
-    })
-      .populate("user", "username avatar")
-      .sort({ createdAt: -1 });
+    };
 
-    res.json({ message: "Get reviews successfully", reviews });
+    const [reviews, total] = await Promise.all([
+      Review.find(filter)
+        .populate("user", "username avatar")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Review.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get reviews successfully",
+      reviews,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get reviews", error: error.message });
   }

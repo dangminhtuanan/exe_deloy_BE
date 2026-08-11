@@ -3,6 +3,7 @@ const AITransaction = require("../models/AITransaction");
 const Payment = require("../models/Payment");
 const User = require("../models/User");
 const { getPayOSClient } = require("../config/payos");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 const { isStaffRole } = require("../middleware/roleMiddleware");
 const {
   addPaidAiCredits,
@@ -23,8 +24,22 @@ const {
 // Public: Get all available AI packages
 exports.getAvailablePackages = async (req, res) => {
   try {
-    const packages = await AIPackage.find({ active: true }).sort({ displayOrder: 1, price: 1 });
-    res.json({ message: "Get packages successfully", packages });
+    const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
+    const filter = { active: true };
+
+    const [packages, total] = await Promise.all([
+      AIPackage.find(filter)
+        .sort({ displayOrder: 1, price: 1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      AIPackage.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get packages successfully",
+      packages,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get packages", error: error.message });
   }
@@ -33,8 +48,17 @@ exports.getAvailablePackages = async (req, res) => {
 // Admin/Manager: Get all packages (including inactive)
 exports.getAllPackages = async (req, res) => {
   try {
-    const packages = await AIPackage.find().sort({ displayOrder: 1, price: 1 });
-    res.json({ message: "Get all packages successfully", packages });
+    const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
+    const [packages, total] = await Promise.all([
+      AIPackage.find().sort({ displayOrder: 1, price: 1 }).skip(pagination.skip).limit(pagination.limit),
+      AIPackage.countDocuments(),
+    ]);
+
+    res.json({
+      message: "Get all packages successfully",
+      packages,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get packages", error: error.message });
   }
@@ -111,12 +135,24 @@ exports.deletePackage = async (req, res) => {
 // User: Get their AI transactions
 exports.getMyTransactions = async (req, res) => {
   try {
-    const transactions = await AITransaction.find({ user: req.user.id })
-      .populate("package", "name credits price isTrial")
-      .populate("payment")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const filter = { user: req.user.id };
 
-    res.json({ message: "Get transactions successfully", transactions });
+    const [transactions, total] = await Promise.all([
+      AITransaction.find(filter)
+        .populate("package", "name credits price isTrial")
+        .populate("payment")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      AITransaction.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get transactions successfully",
+      transactions,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get transactions", error: error.message });
   }
@@ -324,13 +360,23 @@ exports.getAllTransactions = async (req, res) => {
     }
     if (req.query.provider) filter.provider = req.query.provider;
 
-    const transactions = await AITransaction.find(filter)
-      .populate("user", "username email phone")
-      .populate("package", "name credits price")
-      .populate("payment")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const [transactions, total] = await Promise.all([
+      AITransaction.find(filter)
+        .populate("user", "username email phone")
+        .populate("package", "name credits price")
+        .populate("payment")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      AITransaction.countDocuments(filter),
+    ]);
 
-    res.json({ message: "Get all transactions successfully", transactions });
+    res.json({
+      message: "Get all transactions successfully",
+      transactions,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get transactions", error: error.message });
   }

@@ -7,6 +7,7 @@ const cloudinary = require("../config/cloudinary");
 const mongoose = require("mongoose");
 const fs = require("fs/promises");
 const path = require("path");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta";
 const FITROOM_API_URL = "https://platform.fitroom.app";
@@ -1034,12 +1035,22 @@ exports.getMyTryOns = async (req, res) => {
       resultImageUrl: { $exists: true, $ne: "", $regex: "res.cloudinary.com" },
       "rawResponse.mixMatchIntermediate": { $ne: true },
     };
-    const recommendations = await AIOutfitRecommendation.find(filter)
-      .populate("product", "name slug images price")
-      .sort({ createdAt: -1 })
-      .limit(50);
 
-    res.json({ message: "Get AI try-ons successfully", recommendations });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const [recommendations, total] = await Promise.all([
+      AIOutfitRecommendation.find(filter)
+        .populate("product", "name slug images price")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      AIOutfitRecommendation.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get AI try-ons successfully",
+      recommendations,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get AI try-ons", error: error.message });
   }
@@ -1222,13 +1233,23 @@ exports.getRecommendations = async (req, res) => {
 
 exports.getBehaviorLogs = async (req, res) => {
   try {
-    const logs = await AIBehaviorLog.find({})
-      .populate("user", "username email role")
-      .populate("product", "name slug")
-      .sort({ createdAt: -1 })
-      .limit(200);
+    const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
 
-    res.json({ message: "Get behavior logs successfully", logs });
+    const [logs, total] = await Promise.all([
+      AIBehaviorLog.find({})
+        .populate("user", "username email role")
+        .populate("product", "name slug")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      AIBehaviorLog.countDocuments(),
+    ]);
+
+    res.json({
+      message: "Get behavior logs successfully",
+      logs,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get behavior logs", error: error.message });
   }
@@ -1236,12 +1257,22 @@ exports.getBehaviorLogs = async (req, res) => {
 
 exports.getChatbotLogs = async (req, res) => {
   try {
-    const logs = await ChatbotLog.find({})
-      .populate("user", "username email role")
-      .sort({ createdAt: -1 })
-      .limit(200);
+    const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
 
-    res.json({ message: "Get chatbot logs successfully", logs });
+    const [logs, total] = await Promise.all([
+      ChatbotLog.find({})
+        .populate("user", "username email role")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      ChatbotLog.countDocuments(),
+    ]);
+
+    res.json({
+      message: "Get chatbot logs successfully",
+      logs,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get chatbot logs", error: error.message });
   }

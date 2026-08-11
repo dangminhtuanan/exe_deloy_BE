@@ -5,6 +5,7 @@ const Product = require("../models/Product");
 const User = require("../models/User");
 const { getPayOSClient } = require("../config/payos");
 const { isStaffRole } = require("../middleware/roleMiddleware");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 const {
   PAYMENT_STATUS,
   PAYMENT_TARGET,
@@ -357,12 +358,24 @@ exports.getPaymentStatusByOrderCode = async (req, res) => {
 
 exports.getMyOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ user: req.user.id })
-      .populate("items.product", "name slug images price")
-      .populate("payment")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const filter = { user: req.user.id };
 
-    res.json({ message: "Get my orders successfully", orders });
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .populate("items.product", "name slug images price")
+        .populate("payment")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Order.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get my orders successfully",
+      orders,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get orders", error: error.message });
   }
@@ -378,13 +391,23 @@ exports.getOrders = async (req, res) => {
       filter.paymentStatus = req.query.paymentStatus;
     }
 
-    const orders = await Order.find(filter)
-      .populate("user", "username email phone address role")
-      .populate("items.product", "name slug images price")
-      .populate("payment")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .populate("user", "username email phone address role")
+        .populate("items.product", "name slug images price")
+        .populate("payment")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Order.countDocuments(filter),
+    ]);
 
-    res.json({ message: "Get orders successfully", orders });
+    res.json({
+      message: "Get orders successfully",
+      orders,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get orders", error: error.message });
   }

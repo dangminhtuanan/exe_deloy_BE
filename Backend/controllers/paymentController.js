@@ -1,6 +1,7 @@
 const Order = require("../models/Order");
 const Payment = require("../models/Payment");
 const { isStaffRole } = require("../middleware/roleMiddleware");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 const {
   PAYMENT_STATUS,
   PAYMENT_TARGET,
@@ -64,12 +65,24 @@ exports.createPayment = async (req, res) => {
 
 exports.getMyPayments = async (req, res) => {
   try {
-    const payments = await Payment.find({ user: req.user.id })
-      .populate("order")
-      .populate("aiTransaction")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const filter = { user: req.user.id };
 
-    res.json({ message: "Get my payments successfully", payments });
+    const [payments, total] = await Promise.all([
+      Payment.find(filter)
+        .populate("order")
+        .populate("aiTransaction")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Payment.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get my payments successfully",
+      payments,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get payments", error: error.message });
   }
@@ -84,13 +97,23 @@ exports.getPayments = async (req, res) => {
     }
     if (req.query.provider) filter.provider = req.query.provider;
 
-    const payments = await Payment.find(filter)
-      .populate("user", "username email phone")
-      .populate("order")
-      .populate("aiTransaction")
-      .sort({ createdAt: -1 });
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const [payments, total] = await Promise.all([
+      Payment.find(filter)
+        .populate("user", "username email phone")
+        .populate("order")
+        .populate("aiTransaction")
+        .sort({ createdAt: -1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Payment.countDocuments(filter),
+    ]);
 
-    res.json({ message: "Get payments successfully", payments });
+    res.json({
+      message: "Get payments successfully",
+      payments,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get payments", error: error.message });
   }

@@ -7,13 +7,27 @@ function getDuplicateMessage(error) {
   return "Category already exists";
 }
 
+const { parsePagination, buildPagination } = require("../utils/pagination");
+
 exports.getCategories = async (req, res) => {
   try {
-    const categories = await Category.find({ isActive: true })
-      .populate("parent", "name slug")
-      .sort({ name: 1 });
+    const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
+    const filter = { isActive: true };
 
-    res.json({ message: "Get categories successfully", categories });
+    const [categories, total] = await Promise.all([
+      Category.find(filter)
+        .populate("parent", "name slug")
+        .sort({ name: 1 })
+        .skip(pagination.skip)
+        .limit(pagination.limit),
+      Category.countDocuments(filter),
+    ]);
+
+    res.json({
+      message: "Get categories successfully",
+      categories,
+      pagination: buildPagination(total, pagination.page, pagination.limit),
+    });
   } catch (error) {
     res.status(500).json({ message: "Cannot get categories", error: error.message });
   }

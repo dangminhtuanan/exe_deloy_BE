@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const AccessLog = require("../models/AccessLog");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
@@ -129,23 +130,37 @@ const login = async (req, res) => {
       process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
       { expiresIn: "7d" }
     );
+
+    const refreshTokenHash = crypto
+      .createHash("sha256")
+      .update(refreshToken)
+      .digest("hex");
+
+    await AccessLog.create({
+      userId: user._id,
+      type: "login",
+      ip: req.ip || req.headers["x-forwarded-for"] || req.connection?.remoteAddress || "",
+      userAgent: req.headers["user-agent"] || "",
+      refreshTokenHash,
+    });
+
     user.refreshToken = refreshToken;
     await user.save();
-      const { password: _, refreshToken: __, ...userDataRaw } = user.toObject();
-      // Sắp xếp lại thứ tự: _id, username, email, phone, address, role, ...
-      const userData = {
-        _id: userDataRaw._id,
-        username: userDataRaw.username,
-        email: userDataRaw.email,
-        phone: userDataRaw.phone || "",
-        address: userDataRaw.address || "",
-        role: userDataRaw.role,
-        createdAt: userDataRaw.createdAt,
-        updatedAt: userDataRaw.updatedAt,
-        __v: userDataRaw.__v,
-        isActive: userDataRaw.isActive
-      };
-      res.json({ message: "Đăng nhập thành công", profile: userData, accessToken, refreshToken });
+
+    const { password: _, refreshToken: __, ...userDataRaw } = user.toObject();
+    const userData = {
+      _id: userDataRaw._id,
+      username: userDataRaw.username,
+      email: userDataRaw.email,
+      phone: userDataRaw.phone || "",
+      address: userDataRaw.address || "",
+      role: userDataRaw.role,
+      createdAt: userDataRaw.createdAt,
+      updatedAt: userDataRaw.updatedAt,
+      __v: userDataRaw.__v,
+      isActive: userDataRaw.isActive
+    };
+    res.json({ message: "Đăng nhập thành công", profile: userData, accessToken, refreshToken });
   } catch (error) {
     console.error("Lỗi login:", error);
     res.status(500).json({ message: "Đã xảy ra lỗi khi đăng nhập", error: error.message });

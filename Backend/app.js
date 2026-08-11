@@ -55,6 +55,7 @@ const payosRoutes = require("./routes/payosRoutes");
 const shippingRoutes = require("./routes/shippingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const reportRoutes = require("./routes/reportRoutes");
+const accessLogRoutes = require("./routes/accessLogRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -71,5 +72,6 @@ app.use("/api/payos", payosRoutes);
 app.use("/api/shipping", shippingRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/reports", reportRoutes);
+app.use("/api/access-logs", accessLogRoutes);
 
 module.exports = app;
