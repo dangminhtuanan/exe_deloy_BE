@@ -197,27 +197,18 @@ exports.purchasePackage = async (req, res) => {
 
     const orderCode = await generateUniquePayOSOrderCode();
 
-    // AITransaction stores package fulfillment; Payment owns the shared payOS lifecycle.
-    const transaction = await AITransaction.create({
-      user: user._id,
-      package: aiPackage._id,
-      amount,
-      credits: aiPackage.credits,
-      provider: "PAYOS",
-      orderCode,
-      status: PAYMENT_STATUS.PENDING,
-    });
     // Create transaction
     let transaction;
     try {
       transaction = await AITransaction.create({
         user: user._id,
         package: aiPackage._id,
-        amount: aiPackage.price,
+        amount,
         credits: aiPackage.credits,
         isTrial: aiPackage.isTrial,
         provider: "PAYOS",
-        status: "pending",
+        orderCode,
+        status: PAYMENT_STATUS.PENDING,
         trialPurchaseKey: aiPackage.isTrial ? String(user._id) : undefined,
       });
     } catch (error) {
