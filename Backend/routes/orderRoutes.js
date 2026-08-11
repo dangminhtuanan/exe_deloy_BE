@@ -13,7 +13,7 @@ const authMiddleware = require("../middleware/authMiddleware");
 const { requireRoles } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
-const staffOnly = [authMiddleware, requireRoles("admin", "manager", "staff")];
+const staffOnly = [authMiddleware, requireRoles("admin", "staff")];
 
 router.post("/", authMiddleware, createOrder);
 router.post("/checkout", authMiddleware, createPayOSCheckout);

@@ -252,7 +252,7 @@ exports.createPayOSCheckout = async (req, res) => {
       tax: totals.tax,
       shippingFee: totals.shippingFee,
       totalAmount: totals.totalAmount,
-      status: "PENDING_PAYMENT",
+      status: "pending",
       paymentStatus: "pending",
     });
 
@@ -291,7 +291,7 @@ exports.createPayOSCheckout = async (req, res) => {
       // Stock has not been reserved yet, so only close the records created for this failed attempt.
       payment.status = PAYMENT_STATUS.FAILED;
       payment.stockRestoredAt = new Date();
-      order.status = "FAILED";
+      order.status = "cancelled";
       order.paymentStatus = "failed";
       await Promise.all([payment.save(), order.save()]);
       throw payosError;
@@ -444,7 +444,21 @@ exports.updateOrderStatus = async (req, res) => {
     }
 
     const previousStatus = order.status;
+    const allowedTransitions = {
+      pending: ["confirmed", "cancelled"],
+      confirmed: ["packing", "cancelled"],
+      packing: ["shipping", "cancelled"],
+      shipping: ["completed", "delivery_failed", "returned"],
+      delivery_failed: ["shipping", "returned"],
+      completed: ["refunded"],
+      cancelled: [],
+      refunded: [],
+      returned: ["refunded"],
+    };
     if (status) {
+      if (status !== previousStatus && !allowedTransitions[previousStatus]?.includes(status)) {
+        return res.status(400).json({ message: `Invalid order status transition: ${previousStatus} -> ${status}` });
+      }
       order.status = status;
     }
 
@@ -480,7 +494,7 @@ exports.cancelMyOrder = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    if (!["pending", "confirmed", "PENDING_PAYMENT"].includes(order.status)) {
+    if (!["pending", "confirmed"].includes(order.status)) {
       return res.status(400).json({ message: "Order cannot be cancelled" });
     }
 

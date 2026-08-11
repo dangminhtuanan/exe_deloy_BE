@@ -4,8 +4,8 @@ const authMiddleware = require("../middleware/authMiddleware");
 const { requireRoles } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
-const reportManagersOnly = [authMiddleware, requireRoles("admin", "manager")];
+const adminOnly = [authMiddleware, requireRoles("admin")];
 
-router.get("/revenue", reportManagersOnly, getRevenueReport);
+router.get("/revenue", adminOnly, getRevenueReport);
 
 module.exports = router;

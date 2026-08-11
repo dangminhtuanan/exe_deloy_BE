@@ -16,7 +16,7 @@ const optionalAuthMiddleware = require("../middleware/optionalAuthMiddleware");
 const { requireRoles } = require("../middleware/roleMiddleware");
 
 const router = express.Router();
-const staffOnly = [authMiddleware, requireRoles("admin", "manager", "staff")];
+const staffOnly = [authMiddleware, requireRoles("admin", "staff")];
 
 router.get("/recommendations", optionalAuthMiddleware, getRecommendations);
 router.post("/chat", optionalAuthMiddleware, chatWithGemini);

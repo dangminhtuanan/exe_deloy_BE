@@ -18,7 +18,7 @@ function canAccessShipping(req, shipping) {
 
 function canCreateShippingForOrder(order) {
   const allowedOrderStatuses = ["confirmed", "packing", "PAID"];
-  const blockedOrderStatuses = ["pending", "PENDING_PAYMENT", "FAILED", "CANCELLED", "cancelled", "refunded", "completed"];
+  const blockedOrderStatuses = ["pending", "cancelled", "refunded", "completed"];
 
   if (blockedOrderStatuses.includes(order.status)) {
     return false;

@@ -5,11 +5,11 @@ const authMiddleware = require("../middleware/authMiddleware");
 const { requireRoles } = require("../middleware/roleMiddleware");
 
 // Middleware combinations
-const adminManagerOnly = [authMiddleware, requireRoles("admin", "manager")];
-const staffOnly = [authMiddleware, requireRoles("admin", "manager", "staff")];
+const adminOnly = [authMiddleware, requireRoles("admin")];
+const staffOnly = [authMiddleware, requireRoles("admin", "staff")];
 const shipperOnly = [authMiddleware, requireRoles("shipper")];
-const shipperManagerAdminOnly = [authMiddleware, requireRoles("shipper", "manager", "admin")];
-const adminManagerShipperOnly = [authMiddleware, requireRoles("admin", "manager", "shipper")];
+const shipperOrAdminOnly = [authMiddleware, requireRoles("shipper", "admin")];
+const adminOrShipperOnly = [authMiddleware, requireRoles("admin", "shipper")];
 
 /**
  * @swagger
@@ -32,7 +32,7 @@ const adminManagerShipperOnly = [authMiddleware, requireRoles("admin", "manager"
  *       401:
  *         description: Không có quyền truy cập
  */
-router.get("/", adminManagerOnly, shippingController.getAllShippings);
+router.get("/", adminOnly, shippingController.getAllShippings);
 
 /**
  * @swagger
@@ -158,7 +158,7 @@ router.get("/:shippingId/history", authMiddleware, shippingController.getShippin
  *       200:
  *         description: Danh sách vận chuyển
  */
-router.get("/shipper/:shipperId", adminManagerShipperOnly, shippingController.getShipperShipments);
+router.get("/shipper/:shipperId", adminOrShipperOnly, shippingController.getShipperShipments);
 
 /**
  * @swagger
@@ -178,7 +178,7 @@ router.get("/shipper/:shipperId", adminManagerShipperOnly, shippingController.ge
  *       200:
  *         description: Thống kê giao hàng, đơn hàng failed, etc
  */
-router.get("/shipper/:shipperId/statistics", adminManagerShipperOnly, shippingController.getShipperStatistics);
+router.get("/shipper/:shipperId/statistics", adminOrShipperOnly, shippingController.getShipperStatistics);
 
 /**
  * @swagger
@@ -211,7 +211,7 @@ router.get("/shipper/:shipperId/statistics", adminManagerShipperOnly, shippingCo
  *       404:
  *         description: Shipper hoặc vận chuyển không tìm thấy
  */
-router.post("/:shippingId/assign-shipper", adminManagerOnly, shippingController.assignShipper);
+router.post("/:shippingId/assign-shipper", adminOnly, shippingController.assignShipper);
 
 /**
  * @swagger
@@ -251,7 +251,7 @@ router.post("/:shippingId/assign-shipper", adminManagerOnly, shippingController.
  *       400:
  *         description: Trạng thái không hợp lệ
  */
-router.put("/:shippingId/status", shipperManagerAdminOnly, shippingController.updateShippingStatus);
+router.put("/:shippingId/status", shipperOrAdminOnly, shippingController.updateShippingStatus);
 
 /**
  * @swagger
@@ -326,6 +326,6 @@ router.put("/:shippingId", staffOnly, shippingController.updateShippingDetails);
  *       400:
  *         description: Không thể hủy vận chuyển này
  */
-router.put("/:shippingId/cancel", adminManagerShipperOnly, shippingController.cancelShipping);
+router.put("/:shippingId/cancel", adminOrShipperOnly, shippingController.cancelShipping);
 
 module.exports = router;

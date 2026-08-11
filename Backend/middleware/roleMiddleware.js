@@ -1,5 +1,5 @@
 function isStaffRole(role) {
-  return ["admin", "manager", "staff"].includes(role);
+  return ["admin", "staff"].includes(role);
 }
 
 function requireRoles(...roles) {

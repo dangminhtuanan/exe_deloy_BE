@@ -24,7 +24,7 @@ function mapPaymentStatusToOrder(status) {
 }
 
 function moveOrderAfterPaid(order) {
-  if (["pending", "PENDING_PAYMENT", "PAID"].includes(order.status)) {
+  if (["pending"].includes(order.status)) {
     order.status = "confirmed";
   }
 }

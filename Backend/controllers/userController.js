@@ -4,7 +4,7 @@ const bcrypt = require("bcryptjs");
 const { parsePagination, buildPagination } = require("../utils/pagination");
 const { getNormalizedEmail } = require("./authController");
 
-const USER_ROLES = ["user", "customer", "staff", "manager", "admin", "shipper"];
+const USER_ROLES = ["user", "staff", "admin", "shipper"];
 
 function getDuplicateFieldMessage(error) {
   if (error?.code !== 11000 || !error.keyPattern) return null;
@@ -24,10 +24,10 @@ function getDuplicateFieldMessage(error) {
 exports.getAllUsers = async (req, res) => {
   try {
     const pagination = parsePagination(req, { defaultLimit: 50, maxLimit: 200 });
-    const filter = { isActive: true };
+    const filter = {};
 
     const [usersRaw, total] = await Promise.all([
-      User.find(filter).select("-password").skip(pagination.skip).limit(pagination.limit),
+      User.find(filter).select("-password -refreshToken").populate("avatar").skip(pagination.skip).limit(pagination.limit),
       User.countDocuments(filter),
     ]);
 
@@ -41,8 +41,13 @@ exports.getAllUsers = async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       __v: user.__v,
-      refreshToken: user.refreshToken,
       isActive: user.isActive,
+      avatar: user.avatar,
+      aiCredits: user.aiCredits,
+      monthlyAiCredits: user.monthlyAiCredits,
+      paidAiCredits: user.paidAiCredits,
+      monthlyAiCreditPeriod: user.monthlyAiCreditPeriod,
+      monthlyAiCreditGrantedAt: user.monthlyAiCreditGrantedAt,
     }));
 
     res.json({
@@ -58,7 +63,7 @@ exports.getAllUsers = async (req, res) => {
 // Lấy thông tin chi tiết một người dùng theo ID (chỉ admin)
 exports.getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id).select("-password");
+    const user = await User.findById(req.params.id).select("-password -refreshToken").populate("avatar");
     if (!user) {
       return res.status(404).json({ message: "Không tìm thấy người dùng" });
     }
@@ -72,8 +77,13 @@ exports.getUserById = async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       __v: user.__v,
-      refreshToken: user.refreshToken,
-      isActive: user.isActive
+      isActive: user.isActive,
+      avatar: user.avatar,
+      aiCredits: user.aiCredits,
+      monthlyAiCredits: user.monthlyAiCredits,
+      paidAiCredits: user.paidAiCredits,
+      monthlyAiCreditPeriod: user.monthlyAiCreditPeriod,
+      monthlyAiCreditGrantedAt: user.monthlyAiCreditGrantedAt,
     };
     res.json({ message: "Lấy thông tin người dùng thành công", user: userData });
   } catch (error) {
@@ -133,8 +143,13 @@ exports.createUser = async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       __v: user.__v,
-      refreshToken: user.refreshToken,
-      isActive: user.isActive
+      isActive: user.isActive,
+      avatar: user.avatar,
+      aiCredits: user.aiCredits,
+      monthlyAiCredits: user.monthlyAiCredits,
+      paidAiCredits: user.paidAiCredits,
+      monthlyAiCreditPeriod: user.monthlyAiCreditPeriod,
+      monthlyAiCreditGrantedAt: user.monthlyAiCreditGrantedAt,
     };
     res.status(201).json({ message: "Tạo người dùng mới thành công", user: userData });
   } catch (error) {
@@ -206,8 +221,13 @@ exports.updateUser = async (req, res) => {
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
       __v: user.__v,
-      refreshToken: user.refreshToken,
-      isActive: user.isActive
+      isActive: user.isActive,
+      avatar: user.avatar,
+      aiCredits: user.aiCredits,
+      monthlyAiCredits: user.monthlyAiCredits,
+      paidAiCredits: user.paidAiCredits,
+      monthlyAiCreditPeriod: user.monthlyAiCreditPeriod,
+      monthlyAiCreditGrantedAt: user.monthlyAiCreditGrantedAt,
     };
     res.json({ message: "Cập nhật người dùng thành công", user: userData });
   } catch (error) {

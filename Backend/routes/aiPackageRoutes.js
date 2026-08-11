@@ -605,14 +605,14 @@ router.get("/transaction/:transactionId", authMiddleware, getTransactionDetails)
 router.post("/use-credits", authMiddleware, useAiCredits);
 
 // Admin/Manager routes - Package management
-router.get("/packages/all", authMiddleware, requireRoles("admin", "manager"), getAllPackages);
-router.post("/packages", authMiddleware, requireRoles("admin", "manager"), createPackage);
-router.put("/packages/:id", authMiddleware, requireRoles("admin", "manager"), updatePackage);
-router.delete("/packages/:id", authMiddleware, requireRoles("admin", "manager"), deletePackage);
+router.get("/packages/all", authMiddleware, requireRoles("admin"), getAllPackages);
+router.post("/packages", authMiddleware, requireRoles("admin"), createPackage);
+router.put("/packages/:id", authMiddleware, requireRoles("admin"), updatePackage);
+router.delete("/packages/:id", authMiddleware, requireRoles("admin"), deletePackage);
 
 // Admin routes - Transaction management
-router.get("/transactions", authMiddleware, requireRoles("admin", "manager"), getAllTransactions);
-router.post("/add-credits", authMiddleware, requireRoles("admin", "manager"), addCreditsToUser);
+router.get("/transactions", authMiddleware, requireRoles("admin"), getAllTransactions);
+router.post("/add-credits", authMiddleware, requireRoles("admin"), addCreditsToUser);
 
 // Backward-compatible alias. Configure payOS with the canonical /api/payos/webhook URL.
 router.post("/webhook/payos", handlePayOSWebhook);

@@ -166,7 +166,7 @@ async function markPaymentPaid(paymentOrId, data, rawPayload = null) {
       const order = await Order.findById(payment.order).session(session);
       if (!order) throw new Error("Order not found for payment");
 
-      if (["PENDING_PAYMENT", "pending", "PAID"].includes(order.status)) {
+      if (["pending"].includes(order.status)) {
         order.status = "confirmed";
       }
       order.paymentStatus = "paid";

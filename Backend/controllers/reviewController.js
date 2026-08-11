@@ -1,6 +1,7 @@
 const Order = require("../models/Order");
 const Product = require("../models/Product");
 const Review = require("../models/Review");
+const { parsePagination, buildPagination } = require("../utils/pagination");
 
 function isReviewOwner(req, review) {
   return req.user?.role === "user" && String(review.user) === String(req.user.id);
@@ -62,6 +63,40 @@ exports.getProductReviews = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: "Cannot get reviews", error: error.message });
   }
+};
+
+exports.getAllReviews = async (req, res) => {
+  try {
+    const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
+    const filter = req.query.visible === "true" ? { isVisible: true } : req.query.visible === "false" ? { isVisible: false } : {};
+    const [reviews, total] = await Promise.all([
+      Review.find(filter).populate("user", "username email").populate("product", "name slug").sort({ createdAt: -1 }).skip(pagination.skip).limit(pagination.limit),
+      Review.countDocuments(filter),
+    ]);
+    res.json({ message: "Get all reviews successfully", reviews, pagination: buildPagination(total, pagination.page, pagination.limit) });
+  } catch (error) { res.status(500).json({ message: "Cannot get reviews", error: error.message }); }
+};
+
+exports.setReviewVisibility = async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ message: "Review not found" });
+    review.isVisible = Boolean(req.body.isVisible);
+    await review.save();
+    await updateProductRating(review.product);
+    res.json({ message: "Review visibility updated", review });
+  } catch (error) { res.status(500).json({ message: "Cannot update review", error: error.message }); }
+};
+
+exports.adminDeleteReview = async (req, res) => {
+  try {
+    const review = await Review.findById(req.params.id);
+    if (!review) return res.status(404).json({ message: "Review not found" });
+    const productId = review.product;
+    await review.deleteOne();
+    await updateProductRating(productId);
+    res.json({ message: "Review deleted successfully" });
+  } catch (error) { res.status(500).json({ message: "Cannot delete review", error: error.message }); }
 };
 
 exports.createReview = async (req, res) => {

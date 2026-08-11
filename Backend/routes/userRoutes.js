@@ -4,11 +4,6 @@ const authMiddleware = require("../middleware/authMiddleware");
 const router = express.Router();
 
 // Middleware kiểm tra quyền admin
-function managerOrAdmin(req, res, next) {
-  if (req.user && ["admin", "manager"].includes(req.user.role)) return next();
-  return res.status(403).json({ message: "Permission denied" });
-}
-
 function adminOnly(req, res, next) {
   if (req.user && req.user.role === "admin") return next();
   return res.status(403).json({ message: "Chỉ admin mới được phép!" });
@@ -35,7 +30,7 @@ router.use(authMiddleware);
  *       200:
  *         description: Danh sách user
  */
-router.get("/", managerOrAdmin, getAllUsers);
+router.get("/", adminOnly, getAllUsers);
 
 /**
  * @swagger
@@ -55,7 +50,7 @@ router.get("/", managerOrAdmin, getAllUsers);
  *       200:
  *         description: Thông tin user
  */
-router.get("/:id", managerOrAdmin, getUserById);
+router.get("/:id", adminOnly, getUserById);
 
 /**
  * @swagger
