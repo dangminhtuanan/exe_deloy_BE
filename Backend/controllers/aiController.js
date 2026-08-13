@@ -716,6 +716,22 @@ function buildFallbackAnswer(products, question) {
     : `Mình gợi ý ${productNames} trong các sản phẩm nổi bật hiện có. Bạn có thể nói thêm về phong cách, màu sắc hoặc ngân sách để mình lọc kỹ hơn.`;
 }
 
+function isGreetingMessage(value) {
+  const normalized = normalizeText(value).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const greetings = new Set([
+    "hi",
+    "hello",
+    "hey",
+    "xin chao",
+    "chao",
+    "chao ban",
+    "chao shop",
+    "alo",
+  ]);
+
+  return greetings.has(normalized);
+}
+
 function extractGeminiText(data) {
   const parts = data?.candidates?.[0]?.content?.parts || [];
   const text = parts
@@ -847,6 +863,25 @@ exports.chatWithGemini = async (req, res) => {
 
     if (!question) {
       return res.status(400).json({ message: "Question is required" });
+    }
+
+    if (isGreetingMessage(question)) {
+      const answer = "Xin chào bạn! Mình là trợ lý thời trang của OUTFIO. Bạn muốn tìm sản phẩm, chọn trang phục theo dịp hay cần mình tư vấn phối đồ?";
+
+      await ChatbotLog.create({
+        user: req.user?.id || null,
+        question,
+        answer,
+        intent: "greeting",
+        metadata: { model: "local-intent" },
+      });
+
+      return res.json({
+        message: "Chat successfully",
+        answer,
+        model: "local-intent",
+        products: [],
+      });
     }
 
     const limit = Math.min(Math.max(Number(req.body.limit) || 4, 1), 8);

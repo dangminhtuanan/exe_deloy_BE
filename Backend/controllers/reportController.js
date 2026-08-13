@@ -88,7 +88,6 @@ exports.getRevenueReport = async (req, res) => {
             _id: null,
             totalRevenue: { $sum: "$totalAmount" },
             subtotal: { $sum: "$subtotal" },
-            tax: { $sum: "$tax" },
             shippingFee: { $sum: "$shippingFee" },
             orderCount: { $sum: 1 },
             itemCount: { $sum: "$itemCount" },
@@ -200,7 +199,6 @@ exports.getRevenueReport = async (req, res) => {
     const summary = summaryResult[0] || {
       totalRevenue: 0,
       subtotal: 0,
-      tax: 0,
       shippingFee: 0,
       orderCount: 0,
       itemCount: 0,

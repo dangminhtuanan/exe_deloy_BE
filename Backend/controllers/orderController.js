@@ -73,14 +73,12 @@ async function restoreOrderStock(order) {
 
 function calculateCheckoutTotals(orderItems) {
   const subtotal = orderItems.reduce((total, item) => total + item.subtotal, 0);
-  const tax = Math.round(subtotal * 0.1);
   const shippingFee = subtotal > 500000 ? 0 : 30000;
 
   return {
     subtotal,
-    tax,
     shippingFee,
-    totalAmount: subtotal + tax + shippingFee,
+    totalAmount: subtotal + shippingFee,
   };
 }
 
@@ -153,7 +151,6 @@ exports.createOrder = async (req, res) => {
       address,
       note: req.body.note || "",
       subtotal: totals.subtotal,
-      tax: totals.tax,
       shippingFee: totals.shippingFee,
       totalAmount: totals.totalAmount,
       paymentStatus: "pending",
@@ -249,7 +246,6 @@ exports.createPayOSCheckout = async (req, res) => {
       address,
       note,
       subtotal: totals.subtotal,
-      tax: totals.tax,
       shippingFee: totals.shippingFee,
       totalAmount: totals.totalAmount,
       status: "pending",
@@ -274,7 +270,7 @@ exports.createPayOSCheckout = async (req, res) => {
       paymentLink = await payOS.paymentRequests.create({
         orderCode,
         amount: totals.totalAmount,
-        description: `OUTFIO${orderCode}`,
+        description: `${customerName} thanh toán đơn hàng OUTFIO${orderCode}`,
         items: orderItems.map((item) => ({
           name: item.name.slice(0, 100),
           quantity: item.quantity,

@@ -102,11 +102,6 @@ const orderSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
-    tax: {
-      type: Number,
-      min: 0,
-      default: 0,
-    },
     shippingFee: {
       type: Number,
       min: 0,
@@ -142,7 +137,8 @@ const orderSchema = new mongoose.Schema(
 );
 
 orderSchema.methods.calculateTotal = function calculateTotal() {
-  this.totalAmount = this.items.reduce((total, item) => total + item.subtotal, 0);
+  this.subtotal = this.items.reduce((total, item) => total + item.subtotal, 0);
+  this.totalAmount = this.subtotal + (this.shippingFee || 0);
   return this.totalAmount;
 };
 
