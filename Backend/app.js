@@ -56,6 +56,7 @@ const shippingRoutes = require("./routes/shippingRoutes");
 const uploadRoutes = require("./routes/uploadRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const accessLogRoutes = require("./routes/accessLogRoutes");
+const issueReportRoutes = require("./routes/issueReportRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
@@ -73,5 +74,6 @@ app.use("/api/shipping", shippingRoutes);
 app.use("/api/upload", uploadRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/access-logs", accessLogRoutes);
+app.use("/api/issue-reports", issueReportRoutes);
 
 module.exports = app;

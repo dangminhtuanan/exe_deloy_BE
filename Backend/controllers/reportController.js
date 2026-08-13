@@ -1,4 +1,5 @@
 const Order = require("../models/Order");
+const Payment = require("../models/Payment");
 
 const REVENUE_EXCLUDED_STATUSES = [
   "cancelled",
@@ -67,6 +68,13 @@ exports.getRevenueReport = async (req, res) => {
     const timezone = req.query.timezone || "Asia/Ho_Chi_Minh";
     const { match, from, to } = buildRevenueMatch(req.query);
     const dateFormat = getDateFormat(groupBy);
+    const paymentDateMatch = {};
+    if (from || to) {
+      paymentDateMatch.createdAt = {};
+      if (from) paymentDateMatch.createdAt.$gte = from;
+      if (to) paymentDateMatch.createdAt.$lte = to;
+    }
+    const paidPaymentMatch = { ...paymentDateMatch, status: "PAID" };
 
     const [
       summaryResult,
@@ -75,39 +83,34 @@ exports.getRevenueReport = async (req, res) => {
       revenueByPaymentStatus,
       topProducts,
       recentOrders,
+      paidOrderSummary,
     ] = await Promise.all([
-      Order.aggregate([
-        { $match: match },
-        {
-          $addFields: {
-            itemCount: { $sum: "$items.quantity" },
-          },
-        },
+      Payment.aggregate([
+        { $match: paidPaymentMatch },
         {
           $group: {
             _id: null,
-            totalRevenue: { $sum: "$totalAmount" },
-            subtotal: { $sum: "$subtotal" },
-            shippingFee: { $sum: "$shippingFee" },
+            totalRevenue: { $sum: "$amount" },
+            orderRevenue: { $sum: { $cond: [{ $eq: ["$targetType", "ORDER"] }, "$amount", 0] } },
+            aiPackageRevenue: { $sum: { $cond: [{ $eq: ["$targetType", "AI_PACKAGE"] }, "$amount", 0] } },
             orderCount: { $sum: 1 },
-            itemCount: { $sum: "$itemCount" },
-            averageOrderValue: { $avg: "$totalAmount" },
+            averageOrderValue: { $avg: "$amount" },
           },
         },
         { $project: { _id: 0 } },
       ]),
-      Order.aggregate([
-        { $match: match },
+      Payment.aggregate([
+        { $match: paidPaymentMatch },
         {
           $group: {
             _id: {
               $dateToString: {
                 format: dateFormat,
-                date: "$createdAt",
+                date: { $ifNull: ["$paidAt", "$createdAt"] },
                 timezone,
               },
             },
-            revenue: { $sum: "$totalAmount" },
+            revenue: { $sum: "$amount" },
             orderCount: { $sum: 1 },
           },
         },
@@ -140,17 +143,12 @@ exports.getRevenueReport = async (req, res) => {
         },
         { $sort: { revenue: -1 } },
       ]),
-      Order.aggregate([
-        {
-          $match: {
-            ...(match.createdAt ? { createdAt: match.createdAt } : {}),
-            paymentStatus: { $in: ["unpaid", "pending", "paid", "failed", "refunded"] },
-          },
-        },
+      Payment.aggregate([
+        { $match: paymentDateMatch },
         {
           $group: {
-            _id: "$paymentStatus",
-            totalAmount: { $sum: "$totalAmount" },
+            _id: "$status",
+            totalAmount: { $sum: "$amount" },
             orderCount: { $sum: 1 },
           },
         },
@@ -194,16 +192,27 @@ exports.getRevenueReport = async (req, res) => {
         .select("customerName phone totalAmount status paymentStatus createdAt user")
         .sort({ createdAt: -1 })
         .limit(limitRecentOrders),
+      Order.aggregate([
+        { $match: match },
+        { $addFields: { itemCount: { $sum: "$items.quantity" } } },
+        { $group: { _id: null, subtotal: { $sum: "$subtotal" }, shippingFee: { $sum: "$shippingFee" }, itemCount: { $sum: "$itemCount" } } },
+        { $project: { _id: 0 } },
+      ]),
     ]);
 
     const summary = summaryResult[0] || {
       totalRevenue: 0,
+      orderRevenue: 0,
+      aiPackageRevenue: 0,
       subtotal: 0,
       shippingFee: 0,
       orderCount: 0,
       itemCount: 0,
       averageOrderValue: 0,
     };
+    summary.subtotal = paidOrderSummary[0]?.subtotal || 0;
+    summary.shippingFee = paidOrderSummary[0]?.shippingFee || 0;
+    summary.itemCount = paidOrderSummary[0]?.itemCount || 0;
 
     res.json({
       message: "Get revenue report successfully",
