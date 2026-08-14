@@ -275,7 +275,7 @@ exports.purchasePackage = async (req, res) => {
       const paymentLinkData = {
         orderCode,
         amount,
-        description: `${user.username} AIPACKAGE${orderCode}`,
+        description: `AIPKG${orderCode}`,
         items: [
           {
             name: aiPackage.name.slice(0, 100),
