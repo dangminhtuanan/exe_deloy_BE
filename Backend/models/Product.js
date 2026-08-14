@@ -137,6 +137,7 @@ const productSchema = new mongoose.Schema(
 productSchema.index({ name: "text", description: "text", brand: "text" });
 productSchema.index({ category: 1, isActive: 1 });
 productSchema.index({ price: 1 });
+productSchema.index({ stock: 1, updatedAt: -1 });
 
 productSchema.pre("validate", function setSlug(next) {
   if (!this.slug && this.name) {

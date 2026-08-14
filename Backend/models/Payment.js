@@ -87,6 +87,7 @@ paymentSchema.index({ transactionNo: 1 }, { sparse: true });
 paymentSchema.index({ order: 1 });
 paymentSchema.index({ aiTransaction: 1 });
 paymentSchema.index({ user: 1 });
+paymentSchema.index({ status: 1, paidAt: -1, targetType: 1 });
 
 paymentSchema.set("toJSON", {
   transform(document, returnedObject) {

@@ -625,6 +625,18 @@ function scoreProduct(product, question) {
 
 function buildKeywordFilter(keyword) {
   const filter = { isActive: true, stock: { $gt: 0 } };
+  const normalizedKeyword = normalizeText(keyword);
+  const budgetMatch = normalizedKeyword.match(/(?:duoi|toi da|ngan sach)\s*(\d+(?:[.,]\d+)?)\s*(k|trieu|m)?/);
+
+  if (budgetMatch) {
+    const rawAmount = Number(budgetMatch[1].replace(",", "."));
+    const multiplier = budgetMatch[2] === "trieu" || budgetMatch[2] === "m" ? 1000000 : budgetMatch[2] === "k" ? 1000 : 1;
+    filter.price = { $lte: rawAmount * multiplier };
+  }
+
+  if (normalizedKeyword.includes("sale") || normalizedKeyword.includes("khuyen mai") || normalizedKeyword.includes("giam gia")) {
+    filter.$expr = { $gt: ["$originalPrice", "$price"] };
+  }
 
   if (keyword) {
     const tokens = getSearchTokens(keyword);
@@ -674,7 +686,11 @@ async function findRelevantProducts(question, limit) {
     return scoredProducts;
   }
 
-  return Product.find({ isActive: true, stock: { $gt: 0 } })
+  const fallbackFilter = { isActive: true, stock: { $gt: 0 } };
+  if (filter.price) fallbackFilter.price = filter.price;
+  if (filter.$expr) fallbackFilter.$expr = filter.$expr;
+
+  return Product.find(fallbackFilter)
     .populate("category", "name slug")
     .sort({ isFeatured: -1, averageRating: -1, sold: -1, createdAt: -1 })
     .limit(limit);
@@ -703,7 +719,15 @@ function summarizeProducts(products) {
     .join("\n");
 }
 
-function buildFallbackAnswer(products, question) {
+function buildFallbackAnswer(products, question, intent = "product_recommendation") {
+  if (intent !== "product_recommendation") {
+    const normalized = normalizeText(question);
+    if (["don hang", "giao hang", "van chuyen", "thanh toan"].some((token) => normalized.includes(token))) {
+      return "Mình có thể hướng dẫn bạn kiểm tra đơn hàng, thanh toán và trạng thái giao hàng trong mục Hồ sơ. Bạn cho mình biết mã đơn hoặc vấn đề cụ thể nhé.";
+    }
+    return "Mình có thể hỗ trợ tìm sản phẩm, chọn size, phối đồ, kiểm tra giá hoặc hướng dẫn mua hàng. Bạn mô tả cụ thể điều muốn hỏi để mình hỗ trợ chính xác nhé.";
+  }
+
   if (!products.length) {
     return "Mình chưa tìm thấy sản phẩm phù hợp trong cửa hàng. Bạn có thể nói rõ hơn về kiểu áo, màu sắc, size hoặc dịp mặc để mình gợi ý chính xác hơn.";
   }
@@ -730,6 +754,56 @@ function isGreetingMessage(value) {
   ]);
 
   return greetings.has(normalized);
+}
+
+function normalizeConversationHistory(value) {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .slice(-10)
+    .map((item) => ({
+      role: item?.role === "assistant" ? "assistant" : "user",
+      content: String(item?.content || "").trim().slice(0, 800),
+    }))
+    .filter((item) => item.content);
+}
+
+function isVagueHelpRequest(value) {
+  const normalized = normalizeText(value).replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+  const vagueRequests = new Set([
+    "toi muon hoi",
+    "minh muon hoi",
+    "cho toi hoi",
+    "cho minh hoi",
+    "toi can hoi",
+    "minh can hoi",
+    "tu van cho toi",
+    "tu van cho minh",
+    "giup toi voi",
+    "giup minh voi",
+  ]);
+
+  return vagueRequests.has(normalized) || normalized.length < 3;
+}
+
+function hasProductRecommendationIntent(value) {
+  const normalized = normalizeText(value);
+  const intentTokens = [
+    "ao", "quan", "vay", "dam", "hoodie", "jacket", "jean", "short", "polo", "somi", "thun",
+    "san pham", "mua", "tim", "goi y", "phoi do", "mac gi", "outfit", "size", "mau", "chat lieu",
+    "trang phuc", "do di", "di choi", "du tiec", "cong so", "di lam", "the thao",
+    "gia", "sale", "khuyen mai", "ngan sach", "duoi", "tren", "re", "con hang", "thoi trang",
+  ];
+
+  return intentTokens.some((token) => normalized.includes(token));
+}
+
+function buildConversationContext(history) {
+  if (!history.length) return "Chua co lich su hoi thoai.";
+
+  return history
+    .map((item) => `${item.role === "assistant" ? "Tro ly" : "Khach hang"}: ${item.content}`)
+    .join("\n");
 }
 
 function extractGeminiText(data) {
@@ -762,7 +836,7 @@ async function generateWithModel(model, prompt, apiKey) {
           },
         ],
         generationConfig: {
-          temperature: 0.7,
+          temperature: 0.45,
           maxOutputTokens: 700,
         },
       }),
@@ -860,6 +934,7 @@ exports.createChatbotLog = async (req, res) => {
 exports.chatWithGemini = async (req, res) => {
   try {
     const question = (req.body.question || req.body.message || "").trim();
+    const history = normalizeConversationHistory(req.body.history);
 
     if (!question) {
       return res.status(400).json({ message: "Question is required" });
@@ -884,8 +959,30 @@ exports.chatWithGemini = async (req, res) => {
       });
     }
 
+    if (isVagueHelpRequest(question)) {
+      const answer = "Mình sẵn sàng hỗ trợ. Bạn muốn hỏi về tìm sản phẩm, chọn size, phối đồ, giá/khuyến mãi hay đơn hàng và giao hàng?";
+
+      await ChatbotLog.create({
+        user: req.user?.id || null,
+        question,
+        answer,
+        intent: "clarification",
+        metadata: { model: "local-intent" },
+      });
+
+      return res.json({ message: "Chat successfully", answer, model: "local-intent", products: [] });
+    }
+
     const limit = Math.min(Math.max(Number(req.body.limit) || 4, 1), 8);
-    const products = await findRelevantProducts(question, limit);
+    const recentUserContext = history
+      .filter((item) => item.role === "user")
+      .slice(-3)
+      .map((item) => item.content)
+      .join(" ");
+    const contextualQuestion = `${recentUserContext} ${question}`.trim();
+    const productIntent = hasProductRecommendationIntent(contextualQuestion);
+    const intent = productIntent ? "product_recommendation" : "general_support";
+    const products = productIntent ? await findRelevantProducts(contextualQuestion, limit) : [];
 
     const productContext = products.length
       ? summarizeProducts(products)
@@ -893,10 +990,17 @@ exports.chatWithGemini = async (req, res) => {
     const prompt = [
       "Ban la tro ly mua sam cho website thoi trang.",
       "Tra loi bang tieng Viet co dau, ngan gon, than thien, tap trung tu van san pham.",
+      "Hay doc lich su hoi thoai de hieu cac tu noi tiep nhu 'mau khac', 'size nao', 'cai thu hai' va khong hoi lai thong tin khach da cung cap.",
+      "Neu cau hoi con mo ho hoac chua du thong tin, phai hoi mot cau lam ro thay vi tu dong goi y san pham.",
+      "Chi tu van san pham khi khach co nhu cau tim, mua, chon size, chon mau hoac phoi do.",
+      "Voi don hang, thanh toan hay giao hang, huong dan khach vao Ho so va khong tu tao trang thai hoac ma don.",
       "Khong dung markdown, khong dung dau **, khong lap lai danh sach theo kieu danh so.",
       "Frontend se hien thi card san pham rieng, nen cau tra loi chi can 1-2 cau tom tat ly do goi y.",
       "Chi dua ra thong tin dua tren danh sach san pham duoc cung cap. Neu khong du thong tin, hay noi ro va hoi them nhu cau.",
       "Neu co san pham phu hop, nhac den toi da 2 ten san pham noi bat va ly do ngan gon.",
+      "",
+      "Lich su hoi thoai:",
+      buildConversationContext(history),
       "",
       `Cau hoi khach hang: ${question}`,
       "",
@@ -909,7 +1013,7 @@ exports.chatWithGemini = async (req, res) => {
       geminiResult = await callGemini(prompt);
     } catch (error) {
       geminiResult = {
-        answer: buildFallbackAnswer(products, question),
+        answer: buildFallbackAnswer(products, question, intent),
         model: "local-fallback",
         providerError: error.message,
       };
@@ -921,10 +1025,11 @@ exports.chatWithGemini = async (req, res) => {
       user: req.user?.id || null,
       question,
       answer,
-      intent: "gemini_chat",
+      intent,
       metadata: {
         model: geminiResult.model,
         productIds: products.map((product) => product._id),
+        historyLength: history.length,
       },
     });
 

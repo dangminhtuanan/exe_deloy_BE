@@ -136,6 +136,8 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+orderSchema.index({ paymentStatus: 1, status: 1, createdAt: -1 });
+
 orderSchema.methods.calculateTotal = function calculateTotal() {
   this.subtotal = this.items.reduce((total, item) => total + item.subtotal, 0);
   this.totalAmount = this.subtotal + (this.shippingFee || 0);
