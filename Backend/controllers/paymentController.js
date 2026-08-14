@@ -1,5 +1,6 @@
 const Order = require("../models/Order");
 const Payment = require("../models/Payment");
+const AITransaction = require("../models/AITransaction");
 const { isStaffRole } = require("../middleware/roleMiddleware");
 const { parsePagination, buildPagination } = require("../utils/pagination");
 const {
@@ -223,5 +224,28 @@ exports.updatePaymentStatus = async (req, res) => {
     res.json({ message: "Update payment successfully", payment });
   } catch (error) {
     res.status(500).json({ message: "Cannot update payment", error: error.message });
+  }
+};
+
+exports.deletePayment = async (req, res) => {
+  try {
+    const payment = await Payment.findById(req.params.id);
+    if (!payment) {
+      return res.status(404).json({ message: "Payment not found" });
+    }
+
+    await Promise.all([
+      payment.order
+        ? Order.updateOne({ _id: payment.order, payment: payment._id }, { $unset: { payment: 1 } })
+        : Promise.resolve(),
+      payment.aiTransaction
+        ? AITransaction.updateOne({ _id: payment.aiTransaction, payment: payment._id }, { $unset: { payment: 1 } })
+        : Promise.resolve(),
+    ]);
+
+    await payment.deleteOne();
+    res.json({ message: "Delete payment successfully" });
+  } catch (error) {
+    res.status(500).json({ message: "Cannot delete payment", error: error.message });
   }
 };

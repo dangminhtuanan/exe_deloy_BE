@@ -165,7 +165,7 @@ exports.createUser = async (req, res) => {
 // Cập nhật thông tin người dùng (chỉ admin)
 exports.updateUser = async (req, res) => {
   try {
-    const { username, email, role, phone, address } = req.body;
+    const { username, email, role, phone, address, isActive } = req.body;
     const user = await User.findById(req.params.id);
     if (!user) {
       return res.status(404).json({ message: "Không tìm thấy người dùng" });
@@ -210,6 +210,12 @@ exports.updateUser = async (req, res) => {
       }
       user.address = address;
     }
+    if (isActive !== undefined) {
+      if (typeof isActive !== "boolean") {
+        return res.status(400).json({ message: "Trạng thái tài khoản không hợp lệ" });
+      }
+      user.isActive = isActive;
+    }
     await user.save();
     const userData = {
       _id: user._id,
@@ -249,7 +255,10 @@ exports.deleteUser = async (req, res) => {
     }
     user.isActive = false;
     await user.save();
-    res.json({ message: "Đã chuyển trạng thái người dùng sang không hoạt động" });
+    const userData = user.toObject();
+    delete userData.password;
+    delete userData.refreshToken;
+    res.json({ message: "Đã khóa tài khoản người dùng", user: userData });
   } catch (error) {
     res.status(500).json({ message: "Đã xảy ra lỗi khi cập nhật trạng thái người dùng", error });
   }
