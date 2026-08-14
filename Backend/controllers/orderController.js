@@ -270,7 +270,7 @@ exports.createPayOSCheckout = async (req, res) => {
       paymentLink = await payOS.paymentRequests.create({
         orderCode,
         amount: totals.totalAmount,
-        description: `${customerName} thanh toán đơn hàng OUTFIO${orderCode}`,
+        description: `${customerName} ORDER${orderCode}`,
         items: orderItems.map((item) => ({
           name: item.name.slice(0, 100),
           quantity: item.quantity,
