@@ -246,9 +246,9 @@ exports.getRevenueReport = async (req, res) => {
       Payment.countDocuments({ status: "PAID" }),
       Shipping.countDocuments(),
       Shipping.countDocuments({ shippingStatus: { $nin: ["delivered", "failed", "returned", "cancelled"] } }),
-      Product.countDocuments(),
-      Product.countDocuments({ stock: { $lte: 5 } }),
-      Product.find({ stock: { $lte: 5 } })
+      Product.countDocuments({ isActive: true }),
+      Product.countDocuments({ isActive: true, stock: { $lte: 5 } }),
+      Product.find({ isActive: true, stock: { $lte: 5 } })
         .select("name stock images price")
         .sort({ stock: 1, updatedAt: -1 })
         .limit(6),
