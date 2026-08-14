@@ -98,7 +98,7 @@ exports.getPayments = async (req, res) => {
     if (req.query.provider) filter.provider = req.query.provider;
 
     const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
-    const [payments, total] = await Promise.all([
+    const [payments, total, paidSummary] = await Promise.all([
       Payment.find(filter)
         .populate("user", "username email phone")
         .populate("order")
@@ -107,12 +107,28 @@ exports.getPayments = async (req, res) => {
         .skip(pagination.skip)
         .limit(pagination.limit),
       Payment.countDocuments(filter),
+      Payment.aggregate([
+        { $match: { status: { $in: [PAYMENT_STATUS.PAID, PAYMENT_STATUS.PAID.toLowerCase()] } } },
+        {
+          $group: {
+            _id: null,
+            paidCount: { $sum: 1 },
+            paidRevenue: { $sum: "$amount" },
+          },
+        },
+      ]),
     ]);
+
+    const summary = paidSummary[0] || { paidCount: 0, paidRevenue: 0 };
 
     res.json({
       message: "Get payments successfully",
       payments,
       pagination: buildPagination(total, pagination.page, pagination.limit),
+      summary: {
+        paidCount: summary.paidCount,
+        paidRevenue: summary.paidRevenue,
+      },
     });
   } catch (error) {
     res.status(500).json({ message: "Cannot get payments", error: error.message });

@@ -207,6 +207,17 @@ exports.purchasePackage = async (req, res) => {
     }
 
     if (aiPackage.isTrial) {
+      // Repair reservations created before cancelled/failed payments started
+      // releasing trialPurchaseKey. This also lets affected users retry now.
+      await AITransaction.updateMany(
+        {
+          user: user._id,
+          trialPurchaseKey: { $exists: true },
+          status: { $in: ["cancelled", "CANCELLED", "failed", "FAILED"] },
+        },
+        { $unset: { trialPurchaseKey: 1 } },
+      );
+
       // This also covers purchases made before trialPurchaseKey was introduced.
       const previousTrialPurchase = await AITransaction.findOne({
         user: user._id,
@@ -361,7 +372,7 @@ exports.getAllTransactions = async (req, res) => {
     if (req.query.provider) filter.provider = req.query.provider;
 
     const pagination = parsePagination(req, { defaultLimit: 25, maxLimit: 100 });
-    const [transactions, total] = await Promise.all([
+    const [transactions, total, paidSummary] = await Promise.all([
       AITransaction.find(filter)
         .populate("user", "username email phone")
         .populate("package", "name credits price")
@@ -370,12 +381,30 @@ exports.getAllTransactions = async (req, res) => {
         .skip(pagination.skip)
         .limit(pagination.limit),
       AITransaction.countDocuments(filter),
+      AITransaction.aggregate([
+        { $match: { status: { $in: [PAYMENT_STATUS.PAID, PAYMENT_STATUS.PAID.toLowerCase()] } } },
+        {
+          $group: {
+            _id: null,
+            paidCount: { $sum: 1 },
+            creditsSold: { $sum: "$credits" },
+            paidRevenue: { $sum: "$amount" },
+          },
+        },
+      ]),
     ]);
+
+    const summary = paidSummary[0] || { paidCount: 0, creditsSold: 0, paidRevenue: 0 };
 
     res.json({
       message: "Get all transactions successfully",
       transactions,
       pagination: buildPagination(total, pagination.page, pagination.limit),
+      summary: {
+        paidCount: summary.paidCount,
+        creditsSold: summary.creditsSold,
+        paidRevenue: summary.paidRevenue,
+      },
     });
   } catch (error) {
     res.status(500).json({ message: "Cannot get transactions", error: error.message });

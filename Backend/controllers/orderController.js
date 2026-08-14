@@ -21,6 +21,24 @@ function canAccessOrder(req, order) {
   return isStaffRole(req.user?.role) || String(order.user._id || order.user) === String(req.user.id);
 }
 
+function isHoChiMinhCity(value) {
+  const normalized = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+
+  return ["thanhphohochiminh", "thanhphohcm", "tphochiminh", "tphcm", "hochiminh", "hcm"]
+    .includes(normalized);
+}
+
+function rejectUnsupportedShippingCity(req, res) {
+  if (isHoChiMinhCity(req.body.city)) return false;
+
+  res.status(400).json({ message: "Hiện tại cửa hàng chỉ giao hàng trong Thành phố Hồ Chí Minh" });
+  return true;
+}
+
 async function buildItemsFromRequest(userId, bodyItems) {
   const sourceItems = [];
 
@@ -105,6 +123,8 @@ async function buildItemsFromServerCart(userId) {
 
 exports.createOrder = async (req, res) => {
   try {
+    if (rejectUnsupportedShippingCity(req, res)) return;
+
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });
@@ -191,6 +211,8 @@ exports.createOrder = async (req, res) => {
 
 exports.createPayOSCheckout = async (req, res) => {
   try {
+    if (rejectUnsupportedShippingCity(req, res)) return;
+
     const user = await User.findById(req.user.id);
     if (!user) {
       return res.status(404).json({ message: "User not found" });

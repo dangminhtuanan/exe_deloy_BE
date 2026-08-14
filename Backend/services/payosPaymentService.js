@@ -261,6 +261,9 @@ async function markPaymentTerminated(paymentOrId, status, rawResponse = null) {
       if (transaction && normalizePaymentStatus(transaction.status) !== PAYMENT_STATUS.PAID) {
         transaction.payment = payment._id;
         transaction.status = terminalStatus;
+        // A cancelled/failed trial payment must not permanently reserve the
+        // one-time trial slot. Only a successful purchase keeps this key.
+        transaction.trialPurchaseKey = undefined;
         await transaction.save({ session });
         payment.aiTransaction = transaction._id;
       }
