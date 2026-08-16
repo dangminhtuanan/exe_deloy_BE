@@ -1,4 +1,5 @@
 const cloudinary = require("../config/cloudinary");
+const UserImageAsset = require("../models/UserImageAsset");
 
 const hasCloudinaryConfig = () =>
   Boolean(
@@ -6,6 +7,13 @@ const hasCloudinaryConfig = () =>
       process.env.CLOUDINARY_API_KEY &&
       process.env.CLOUDINARY_API_SECRET
   );
+
+const serializeAsset = (asset) => ({
+  id: String(asset._id), kind: asset.kind, url: asset.url, name: asset.name,
+  clothType: asset.clothType, color: asset.color, gender: asset.gender,
+  ageGroup: asset.ageGroup, ethnicity: asset.ethnicity, skinTone: asset.skinTone,
+  hairColor: asset.hairColor, tags: asset.tags, createdAt: asset.createdAt,
+});
 
 const uploadImage = (req, res) => {
   try {
@@ -29,7 +37,7 @@ const uploadImage = (req, res) => {
         folder: "exe201_fashion_shop",
         resource_type: "image",
       },
-      (error, result) => {
+      async (error, result) => {
         if (error) {
           console.error("Cloudinary Error:", error);
           return res.status(500).json({
@@ -43,10 +51,19 @@ const uploadImage = (req, res) => {
           });
         }
 
+        const kind = req.body.kind;
+        if (!['model', 'clothing'].includes(kind)) {
+          return res.status(400).json({ message: "Image kind must be model or clothing" });
+        }
+        const asset = await UserImageAsset.create({
+          user: req.user.id, kind, url: result.secure_url, publicId: result.public_id,
+          name: req.body.name || '', clothType: kind === 'clothing' ? (req.body.clothType || 'upper') : '',
+        });
         return res.status(200).json({
           message: "Upload successfully",
           url: result.secure_url,
           public_id: result.public_id,
+          asset: serializeAsset(asset),
         });
       }
     );
@@ -60,6 +77,29 @@ const uploadImage = (req, res) => {
   }
 };
 
+const getMyImages = async (req, res) => {
+  const assets = await UserImageAsset.find({ user: req.user.id }).sort({ createdAt: -1 });
+  res.json({ assets: assets.map(serializeAsset) });
+};
+
+const updateMyImage = async (req, res) => {
+  const allowed = ['name', 'clothType', 'color', 'gender', 'ageGroup', 'ethnicity', 'skinTone', 'hairColor', 'tags'];
+  const updates = Object.fromEntries(allowed.filter((key) => req.body[key] !== undefined).map((key) => [key, req.body[key]]));
+  const asset = await UserImageAsset.findOneAndUpdate({ _id: req.params.id, user: req.user.id }, updates, { new: true, runValidators: true });
+  if (!asset) return res.status(404).json({ message: 'Image not found' });
+  res.json({ asset: serializeAsset(asset) });
+};
+
+const deleteMyImage = async (req, res) => {
+  const asset = await UserImageAsset.findOneAndDelete({ _id: req.params.id, user: req.user.id });
+  if (!asset) return res.status(404).json({ message: 'Image not found' });
+  if (asset.publicId) cloudinary.uploader.destroy(asset.publicId).catch((error) => console.error('Cloudinary delete error:', error.message));
+  res.json({ message: 'Image deleted' });
+};
+
 module.exports = {
   uploadImage,
+  getMyImages,
+  updateMyImage,
+  deleteMyImage,
 };
